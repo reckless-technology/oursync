@@ -34,10 +34,15 @@ What that question turned up:
   under-weighted in the original research, which compared against rclone's defaults rather than a
   tuned configuration.
 - **So the remaining justification is narrower than the design implies**: pinning ("available
-  offline"), per-file status in Nemo, cross-account bandwidth scheduling, and — the one that
-  decides whether this is a product or a plugin — **whether a parallel fetch pool beats rclone's
-  chunked sequential readahead on a gigabit link**. rclone's `--multi-thread-streams` applies to
-  `copy`, not to mount reads, so there is a real possibility here, and it is unmeasured.
+  offline"), per-file status in Nemo, and cross-account bandwidth scheduling. That is the whole
+  list.
+
+  This bullet used to end with a fourth item — whether a parallel fetch pool beats rclone's
+  "chunked sequential readahead", on the grounds that `--multi-thread-streams` applies to `copy` and
+  not to mount reads. **Both halves of that were wrong.** `rclone mount` has
+  **`--vfs-read-chunk-streams`**, "the number of parallel streams to read at once", so its reads are
+  not sequential-only; and the throughput question it was pointing at has since been closed by
+  measurement and by Jonny's acceptance bar. Nothing is left of it.
 
 **The measurement has been attempted and is not finished.** See
 [docs/measurements.md](docs/measurements.md) for every figure with its machine and date, including
