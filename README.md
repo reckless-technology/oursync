@@ -13,17 +13,25 @@ It is built for a particular shape of use: a corpus far larger than the local di
 connection, and reading much more than writing. The read path is parallel and tuned to fill a fast
 downlink; the write path is built to spend as few upload bytes as it can.
 
-**Status: the premise is still being measured.** The design is complete and the foundation is
-written, but the claim the read path rests on — that one stream will not fill a fast downlink — is
-not settled. Over Wi-Fi a single range request runs at whatever the link carries and `rclone mount`
-keeps up with it, but that link saturates at about one stream's rate, so it cannot show a
-per-connection cap. The wired run that could have is void: it was taken on a CI machine that turned
-out to be running someone else's jobs throughout. The numbers, the void ones included, are in
-[docs/measurements.md](docs/measurements.md).
+## Status: built on rclone, and working — see [`rclone/`](rclone/)
 
-[CLAUDE.md](CLAUDE.md) has the full state and what the next run must do;
-[docs/design.md](docs/design.md) has the architecture and the evidence behind each decision, and
-[docs/plan.md](docs/plan.md) the build order. Nothing here runs yet.
+The daemon described below was **not** built, and should not be. Measured against the real Drive,
+its central claim was false: a single stream runs at whatever the link carries (65.5 MB/s on
+`jonny-precision` over Wi-Fi) and `rclone mount` keeps up with it at 62.3, against an acceptance bar
+of 60. The streaming half of this design had already shipped, years ago, in a tool that was already
+installed. [docs/measurements.md](docs/measurements.md) has every figure, including the runs that
+were void and why.
+
+What rclone genuinely lacks is **pinning** — its cache is eviction-based, with no way to say "keep
+this one". [`rclone/`](rclone/) closes that gap and nothing else: a union of a local pin directory
+over the Drive remote, a mount, a `aqueduct pin`/`unpin` command, two Nemo menu entries and a login
+service. It is installed and tested on `jonny-precision`.
+
+Everything below, and in [docs/design.md](docs/design.md) and [docs/plan.md](docs/plan.md),
+describes the daemon that was designed instead. It is kept because the research in it is sound and
+still answers questions — the API limits, the name mapping, the quota arithmetic, the failure modes
+— and because the record of a design being retired by measurement is worth more than a tidy
+repository. The Go foundation under `internal/` is unused; removing it is a decision not yet taken.
 
 ## Why it exists
 
