@@ -159,6 +159,12 @@ account, and spend his API quota. They never run in CI and never run unattended.
 - **Quota is metered in units, not requests**: 325,000 per user per minute, with a download at
   **200** and a list at 100. Small readahead chunks are disproportionately expensive, which is why
   chunks are 16 MiB.
+- **`modifiedTime` can be in the future, and is in this Drive.** Seven 1 GiB DVD `.VOB` files
+  created in July 2026 report `2036-02-07T01:58:15.000Z` — ten years ahead, read straight from the
+  API, because Drive stores whatever `modifiedTime` an upload supplies and that rip carried the
+  disc's own. Anything assuming `modifiedTime <= now`, resolving conflicts by "newest wins", or
+  validating a cache entry by comparing timestamps will be wrong about these files for a decade.
+  Treat it as an opaque change marker, compared only for equality against the value last seen.
 - **Never advance a change token before the page is applied.** It goes in the same transaction as
   the node updates, or changes are lost silently.
 - **Never wait on the change feed to confirm our own write.** The latency is undocumented and

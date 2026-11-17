@@ -207,6 +207,50 @@ Still untouched, and still the strongest remaining case for the project:
   database fed by Drive's change feed could plausibly beat rclone.
 - **Write behaviour.** Not measured at all.
 
+## What the corpus actually looks like, 2026-11-17
+
+Jonny's remaining frustration with Drive is that **any change to a large file re-uploads all of it**,
+however small the change. That is accurate and it is Google's doing, not something a client can work
+around - §3.3 and the README record the verification. It is also the one thing that would justify
+chunked storage, which §9.16 rejects as a default because it makes the files unusable in Drive's own
+web interface.
+
+So the question is how often it actually bites. Asked of the live Drive rather than guessed:
+
+Files over 100 MB with **any** modification in the last 12 months: **40**, totalling 31.6 GiB. That
+is a complete count, not a sample - the query ordered by `quotaBytesUsed desc` and the 41st result
+was already under 100 MB.
+
+Of those 40, the ones whose `modifiedTime` differs from their `createdTime` - the only ones that
+could have been edited in place rather than simply uploaded - number **10**, and seven of them are
+not edits at all (see below). What is left is a few replaced installer downloads, such as a plugin
+pack re-uploaded three months after the first copy.
+
+Almost everything large on this account is **write-once**: installers, `.iso` images, films, DVD
+rips, archives. They are uploaded and then read. **The no-delta limitation costs this corpus very
+little**, and chunked storage would trade away Drive-native usability to fix a cost that is close to
+hypothetical here. It stays rejected, and now for a measured reason rather than a judgement.
+
+This does not cover the Workspace account (§9 A7), which Jonny says is larger and is not in scope
+yet. If large files are genuinely edited anywhere, it is likelier to be there.
+
+### A real trap found while asking: `modifiedTime` can be in the future
+
+Seven 1 GiB DVD `.VOB` chunks, created 2026-07-26 and 2026-07-27, all report:
+
+```
+modified = 2036-02-07T01:58:15.000Z
+```
+
+**Ten years ahead**, identical across every file in the rip, read straight from the API. Drive
+accepts a client-supplied `modifiedTime` on upload and will store whatever it is given; this came
+from the disc's own filesystem.
+
+Anything that assumes `modifiedTime <= now`, or that resolves a conflict by "newest wins", or that
+validates a cache entry by comparing a stored timestamp against a fetched one, will do the wrong
+thing with these files **and will keep doing it for ten years**. Treat `modifiedTime` as an opaque
+change marker, compare it only for equality against the value last seen, and never as a clock.
+
 ## A note on the control
 
 `speed.cloudflare.com/__down` caps below 100 MiB, answers `403` above it, and begins answering `429`
