@@ -94,15 +94,37 @@ spread. On this machine, at this link speed, **parallelism has no demonstrated e
 One stream also repeatedly ran *faster* than the Cloudflare control beside it (71.8 against 64.1).
 A single Drive connection is therefore not the binding constraint here; the link is.
 
-### reckless-ci-lin-0, wired gigabit, 2026-11-17
+### reckless-ci-lin-0, wired gigabit, 2026-11-17 - **VOID, taken under CI load**
 
-Run on the wired machine because Wi-Fi could not answer the question: precision's link is at about
-the same rate as a single Drive stream, so a per-connection cap would be invisible there. Jonny
-reports about 900 Mbit on ethernet, where a cap at 70 MB/s would leave nearly half the link unused.
+**Do not use these numbers.** Every sample below was taken while `reckless-ci-lin-0` was running
+another session's CI, continuously, at a load average reaching 13.06 on 16 cores.
 
-1 GiB per sample. Two runs: the first was cut short at four samples when the ssh carrying it dropped
-under load, so the second was launched detached with `setsid`. Both are kept; they are independent
-repeats of the same configurations.
+The runner's own worker logs, read afterwards, show back-to-back jobs with roughly two-second gaps:
+
+```
+08:35:32 -> 08:37:32      08:52:23 -> 08:59:52
+08:37:34 -> 08:47:12      08:59:55 -> 09:02:10
+08:47:14 -> 08:50:51      09:02:12 -> 09:04:25
+08:50:53 -> 08:52:21      09:04:27 -> still running
+```
+
+The benchmark ran 09:00:55 to about 09:05. There is no window in it that was not under load.
+
+How this was missed, because the same gap will catch the next person: the check that was run was
+`pgrep -x fastchess`, for a chess match, which is the rule this workspace writes down and it
+correctly reported none. Machine load was read once, at 08:32, and it was 0.00 - **three minutes
+before the first CI job started** - and never read again before measuring half an hour later. The
+workspace's own guidance names `Runner.Worker` beside `cc1plus` or `cmake` as the sign of an
+ordinary CI build, and it was not looked for.
+
+**Before any run on a shared machine: check for the match, check for `Runner.Worker`, and check the
+load again immediately before the first sample, not once at the start of the session.**
+
+The numbers are kept below only so the error is legible, and because one feature of them matters:
+within the first run, taken over a shorter window, the two single-stream samples were 67.1 and 68.8
+- a spread of 1.7 MB/s - while four streams gave 90.9. Pooling that run with the second one produced
+the 17.9 MB/s "spread" that the verdict then leaned on. A contaminated repeat had been allowed to
+set the noise floor, and that is what made a possible 34% gain look like noise.
 
 | streams | samples (MB/s) | mean | spread |
 |---|---|---|---|
@@ -111,13 +133,8 @@ repeats of the same configurations.
 | 8 | 78.1 | 78.1 | - |
 | 16 | 76.4, 84.7, 88.7 | 83.3 | 12.3 |
 
-**A single connection reached 83.3 MB/s, 666 Mbit** - faster than several of the parallel samples.
-There is no per-connection cap anywhere near 70 MB/s. Sixteen streams beat one by 10.0 MB/s on
-means, against a single-stream spread of 17.9: the advantage does not clear the noise.
-
-The Cloudflare control read 68-77 MB/s while Drive samples reached 90.9, so the control understates
-this link - 50 MiB is too short a transfer to measure it, and that endpoint will not serve more.
-The best observed figure puts the link at 727 Mbit or better, consistent with Jonny's 900.
+Nothing may be concluded from this table. It is here as a record of a run that should not have been
+started, and of what pooling a clean window with a contaminated one does to a noise estimate.
 
 ## rclone mount, the incumbent's real number
 
@@ -143,30 +160,38 @@ one-byte bodies under repeated requests, and the script reported 357, 263, 250 a
 script. Both scripts now require the control to return the bytes it asked for and print "failed"
 otherwise. The mount throughputs themselves are unaffected - `dd` moved a real GiB each time.
 
-## The verdict
+## Where this actually stands
 
-| path | precision, Wi-Fi | lin-0, wired |
-|---|---|---|
-| one range request | 65.5 mean | 73.3 mean, 83.3 best |
-| parallel range requests | 60.2-74.7 by stream count | 78.1-83.3 by stream count |
-| rclone mount | 42.5-77.6, 62.3 at defaults | not measured (no rclone there) |
+A verdict was written here on 2026-11-17 saying the design's premise was refuted. **It has been
+withdrawn**, because it rested on the lin-0 table above, and that table is void.
 
-**The design's premise is not supported.** `docs/design.md` §6.6 asserts that one stream will not
-fill a fast downlink. On both machines a single Drive connection runs at or near whatever the link
-will carry, parallel ranges add at most about 10 MB/s, and that gain is smaller than the variation
-between repeats of the same configuration. rclone's mount lands in the same band as raw range
-requests, so its VFS is not leaving throughput on the table either.
+What is established, and what is not:
 
-There is no gap here for Aqueduct's read path to win. What survives is the narrower list already in
-`CLAUDE.md`: pinning, per-file status in Nemo, and cross-account bandwidth scheduling. None of those
-is a reason to write a filesystem.
+| | status |
+|---|---|
+| One stream fills **precision's Wi-Fi** | established. 65.5 MB/s mean, and single samples ran above the link control beside them. |
+| Parallelism helps **on Wi-Fi** | no effect demonstrated - but this machine cannot show one, because the link saturates at about one stream's rate, so a per-connection cap would be invisible. |
+| One stream fills a **gigabit** link | **not measured.** The only wired machine here is a CI runner and it was busy throughout. |
+| `rclone mount` keeps up with raw range requests | established on precision: 62.3 MB/s at defaults, 77.6 tuned, against 65.5 for raw ranges. Not measured on a fast link. |
+| Four streams, as Google's own desktop client uses | **not measured.** The one clean-looking signal - 90.9 MB/s against 67.1 and 68.8 for single streams, a 34% gain - is from the uncontaminated window of a run whose other half was not, and two samples prove nothing. |
 
-What this does **not** settle, stated so nobody mistakes the scope:
+So the question the project turns on is still open, and the next run must be on an idle wired
+machine with enough alternating repeats to resolve a 10-30% difference - roughly twenty samples per
+arm, not three.
 
-- Small-file and metadata latency, which is where a 5 TB corpus is actually painful - directory
-  listings, `stat` storms, opening a file in an application. Throughput on one large file says
-  nothing about it, and it is the one dimension where a local database over Drive's change feed
-  could plausibly beat rclone.
-- Write behaviour. Measured not at all.
-- Whether the gain that does not clear the noise here is real. Settling a 10 MB/s difference against
-  a 17.9 MB/s spread would need many more repeats than were run.
+Still untouched, and still the strongest remaining case for the project:
+
+- **Small-file and metadata latency** across a 5 TB corpus - listings, `stat` storms, opening a file
+  from an application. Throughput on one large file says nothing about it, and it is where a local
+  database fed by Drive's change feed could plausibly beat rclone.
+- **Write behaviour.** Not measured at all.
+
+## A note on the control
+
+`speed.cloudflare.com/__down` caps below 100 MiB, answers `403` above it, and begins answering `429`
+to an address that has used it repeatedly - which this one now has. Both benchmark scripts therefore
+require the control to return the bytes it asked for and print "failed" otherwise.
+
+For a single-against-parallel comparison the external control is not needed anyway: if N streams
+aggregate more than one does on the same machine in the same minutes, then one stream was not the
+limit, and that conclusion needs nothing outside the measurement.

@@ -13,15 +13,15 @@ It is built for a particular shape of use: a corpus far larger than the local di
 connection, and reading much more than writing. The read path is parallel and tuned to fill a fast
 downlink; the write path is built to spend as few upload bytes as it can.
 
-**Status: the premise was measured, and it did not hold.** The design is complete and the foundation
-is written, but the read path it is built around wins nothing. Against a real 5 TB Drive, on Wi-Fi
-and on wired gigabit, a single range request runs at whatever the link will carry, parallel requests
-add less than the variation between repeats, and `rclone mount` lands in the same band. The numbers,
-with the machine and date beside each, are in [docs/measurements.md](docs/measurements.md).
+**Status: the premise is still being measured.** The design is complete and the foundation is
+written, but the claim the read path rests on — that one stream will not fill a fast downlink — is
+not settled. Over Wi-Fi a single range request runs at whatever the link carries and `rclone mount`
+keeps up with it, but that link saturates at about one stream's rate, so it cannot show a
+per-connection cap. The wired run that could have is void: it was taken on a CI machine that turned
+out to be running someone else's jobs throughout. The numbers, the void ones included, are in
+[docs/measurements.md](docs/measurements.md).
 
-What is left to decide is whether this becomes a thin pinning and status layer over rclone or is
-abandoned, and the one thing that could still justify it — small-file and metadata latency across a
-corpus that size — has not been measured. [CLAUDE.md](CLAUDE.md) has the full state;
+[CLAUDE.md](CLAUDE.md) has the full state and what the next run must do;
 [docs/design.md](docs/design.md) has the architecture and the evidence behind each decision, and
 [docs/plan.md](docs/plan.md) the build order. Nothing here runs yet.
 

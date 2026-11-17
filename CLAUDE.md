@@ -39,30 +39,33 @@ What that question turned up:
   chunked sequential readahead on a gigabit link**. rclone's `--multi-thread-streams` applies to
   `copy`, not to mount reads, so there is a real possibility here, and it is unmeasured.
 
-**The measurement has now been run, and it went against the design.** See
-[docs/measurements.md](docs/measurements.md) for every figure with its machine and date.
+**The measurement has been attempted and is not finished.** See
+[docs/measurements.md](docs/measurements.md) for every figure with its machine and date, including
+the ones that are void.
 
-On `jonny-precision` over Wi-Fi and on `reckless-ci-lin-0` over wired gigabit, against Jonny's own
-Drive with his own OAuth client:
+Established, on `jonny-precision` over Wi-Fi, against Jonny's own Drive with his own OAuth client:
+a single range request averages 65.5 MB/s and runs at or above the link control beside it, parallel
+ranges show no effect, and `rclone mount` keeps up (62.3 MB/s at defaults, 77.6 tuned). **But that
+machine cannot answer the question**, because its link saturates at roughly one stream's rate, so a
+per-connection cap would be invisible on it.
 
-- A **single** range request runs at 65.5 MB/s (precision) and 73.3 MB/s mean, 83.3 best (lin-0).
-- **Parallel** range requests add at most about 10 MB/s, which is **smaller than the spread between
-  repeats of the single-stream configuration** (17.9 MB/s on both machines).
-- `rclone mount` delivers 62.3 MB/s at its defaults and up to 77.6 tuned, in the same band as raw
-  range requests. Its VFS is not leaving throughput on the table.
+**The wired run is void.** It was taken on `reckless-ci-lin-0` while that machine ran another
+session's CI continuously, at a load average reaching 13.06 on 16 cores. A verdict was written from
+it and has been withdrawn.
 
-So §6.6's premise — that one stream will not fill a fast downlink — **is not supported**, and the
-read path that the whole daemon exists to provide wins nothing. Do not rebuild it on the belief that
-parallelism is free money here; it was measured and it is not.
+**Before measuring anything on a shared machine**: check for a chess match (`pgrep -x fastchess`,
+never `-f`), check for `Runner.Worker`, and read the load again **immediately before the first
+sample**. Reading it once at the start of a session is how this went wrong — it was 0.00 at 08:32
+and CI started at 08:35:32, three minutes later, and ran for the next half hour.
 
-**This repository should therefore become a thin pinning and status layer over rclone, or be
-abandoned.** That is Jonny's call, not an agent's, and it has not yet been made.
+So §6.6's premise — that one stream will not fill a fast downlink — is **still open**. Jonny notes
+that Google's own Windows client fetches with four parallel streams, which is a real signal worth
+testing rather than assuming either way. The next run needs an **idle wired machine** and about
+twenty alternating samples per arm, enough to resolve a 10-30% difference; three samples cannot.
 
-**What the measurements do not cover, and what could still justify the project**: small-file and
-metadata latency over a 5 TB corpus — listings, `stat` storms, opening a file from an application.
-That is where a local database fed by Drive's change feed could plausibly beat rclone, and it is
-entirely unmeasured. Throughput on one large file says nothing about it. Measure that before either
-reviving the design or closing it.
+**What is untouched, and is the strongest remaining case for the project either way**: small-file
+and metadata latency over a 5 TB corpus — listings, `stat` storms, opening a file from an
+application. Throughput on one large file says nothing about it.
 
 [docs/plan.md](docs/plan.md) has the build order for if it does go ahead; start at M0, and do not
 skip ahead — M0 and M1 exist to settle the refresh-token cap and the name mapping against real data
