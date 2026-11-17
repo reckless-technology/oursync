@@ -42,6 +42,40 @@ if [ ! -r "$TOKEN_FILE" ]; then
 fi
 TOKEN=$(tr -d '\r\n' < "$TOKEN_FILE")
 
+# A busy machine is the commonest way to measure something other than what you meant to, and it
+# leaves no trace in the output. On 2026-11-17 a whole wired run was taken on reckless-ci-lin-0
+# while it ran another session's CI at a load average of 13 on 16 cores; the machine had been
+# checked once, half an hour earlier, when it was idle. So the check belongs in the tool, it runs
+# immediately before the first sample, and the load is recorded beside every row.
+#
+# MAX_LOAD defaults to 2.0. FORCE=1 runs anyway, and the rows are still marked.
+MAX_LOAD="${MAX_LOAD:-2.0}"
+
+busy_reason() {
+    if pgrep -x fastchess > /dev/null 2>&1; then
+        echo "a chess match is running (fastchess)"
+        return
+    fi
+    if pgrep -x Runner.Worker > /dev/null 2>&1; then
+        echo "a CI job is running (Runner.Worker)"
+        return
+    fi
+    local l
+    l=$(awk '{print $1}' /proc/loadavg)
+    if awk -v l="$l" -v m="$MAX_LOAD" 'BEGIN { exit !(l > m) }'; then
+        echo "load average is $l, above MAX_LOAD=$MAX_LOAD"
+        return
+    fi
+    echo ""
+}
+
+REASON=$(busy_reason)
+if [ -n "$REASON" ]; then
+    echo "refusing to measure on a busy machine: $REASON" >&2
+    echo "wait for it to go idle, or set FORCE=1 to measure anyway (rows will be marked)." >&2
+    [ "${FORCE:-0}" = 1 ] || exit 2
+fi
+
 WINDOW=$((WINDOW_MIB * 1024 * 1024))
 FIRST_OFFSET=$((FIRST_OFFSET_MIB * 1024 * 1024))
 URL="https://www.googleapis.com/drive/v3/files/$FILE_ID?alt=media&supportsAllDrives=true"
@@ -92,12 +126,16 @@ echo "file:     $FILE_ID"
 echo "window:   $WINDOW_MIB MiB per sample, first offset $FIRST_OFFSET_MIB MiB"
 echo "control:  $((CONTROL_BYTES / 1048576)) MiB from speed.cloudflare.com after every sample"
 echo
-printf '%-7s %-8s %12s %9s %10s %12s\n' "sample" "streams" "offset(MiB)" "secs" "MB/s" "control MB/s"
+printf '%-7s %-8s %12s %9s %10s %12s %6s %s\n' \
+    "sample" "streams" "offset(MiB)" "secs" "MB/s" "control MB/s" "load" "busy"
 
 i=0
 for N in $CONCURRENCY; do
     OFFSET=$((FIRST_OFFSET + i * WINDOW))
     CHUNK=$((WINDOW / N))
+
+    SAMPLE_BUSY=$(busy_reason)
+    LOAD=$(awk '{print $1}' /proc/loadavg)
 
     START=$(date +%s.%N)
     j=0
@@ -114,14 +152,19 @@ for N in $CONCURRENCY; do
     CONTROL_RATE=$(control)
 
     SECS=$(elapsed "$START" "$END")
-    printf '%-7s %-8s %12s %9s %10s %12s\n' \
+    printf '%-7s %-8s %12s %9s %10s %12s %6s %s\n' \
         "$((i + 1))" "$N" "$((OFFSET / 1048576))" \
-        "$SECS" "$(rate "$WINDOW" "$SECS")" "$CONTROL_RATE"
+        "$SECS" "$(rate "$WINDOW" "$SECS")" "$CONTROL_RATE" \
+        "$LOAD" "${SAMPLE_BUSY:+* $SAMPLE_BUSY}"
 
     i=$((i + 1))
 done
 
 echo
-echo "Compare each sample against the control beside it, not against the other samples: the control"
-echo "is what the link was carrying at that moment. Where the two move together the link is the"
-echo "limit; where the control holds and the sample does not, the limit is Drive's."
+echo "Any row with a * in the last column was taken on a machine that was doing something else, and"
+echo "is not evidence of anything. Do not average it together with the clean rows: a contaminated"
+echo "repeat that widens the spread will make a real effect look like noise."
+echo
+echo "Where there is an external control, compare each sample against the control beside it rather"
+echo "than against the other samples. Where the control reads 'failed' it transferred nothing and"
+echo "says nothing; the single-against-parallel comparison does not depend on it."
