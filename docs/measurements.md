@@ -175,9 +175,30 @@ What is established, and what is not:
 | `rclone mount` keeps up with raw range requests | established on precision: 62.3 MB/s at defaults, 77.6 tuned, against 65.5 for raw ranges. Not measured on a fast link. |
 | Four streams, as Google's own desktop client uses | **not measured.** The one clean-looking signal - 90.9 MB/s against 67.1 and 68.8 for single streams, a 34% gain - is from the uncontaminated window of a run whose other half was not, and two samples prove nothing. |
 
-So the question the project turns on is still open, and the next run must be on an idle wired
-machine with enough alternating repeats to resolve a 10-30% difference - roughly twenty samples per
-arm, not three.
+## The acceptance bar, and why this stops here
+
+Jonny closed the throughput question on 2026-11-17, before the wired re-run happened:
+
+> "If we can consistently achieve 60MB/sec over Wi-Fi on the precision I'll be happy with that.
+> Don't stress about exactly what the speed is because it varies according to other users on the
+> network. My wife and kids also use the Internet. I think you're prematurely optimizing for a
+> problem that in real world conditions isn't an issue."
+
+**60 MB/s on precision's Wi-Fi.** Measured there: a single range request averages 65.5 MB/s over
+twelve samples, and `rclone mount` gives 62.3 at its defaults and 77.6 tuned. The bar is met by the
+simplest thing, and by the tool that already exists.
+
+That makes the wired-gigabit re-run moot and it was cancelled. The household shares the link, so a
+figure measured to a few percent on an idle wired machine would not describe the conditions the
+software runs in. The question is **parked, not answered**: whether one stream fills a gigabit, and
+whether Google's own client is right to use four streams, remain unknown and are now uninteresting
+here.
+
+The lasting correction is to the design, not the data. §6.6 called a parallel fetch pool "the single
+most important performance decision in the design" and sized it at 8 workers, reasoning from a
+measurement taken against a *different service*. The pool is now a latency convenience with a
+default of 2, and §11.2a - "the most consequential measurement in the project" - is closed as a
+question about a bottleneck that was not there.
 
 Still untouched, and still the strongest remaining case for the project:
 

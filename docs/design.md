@@ -594,19 +594,29 @@ whole. The chunk size is chosen by two constraints at once, which happen to agre
 - fewer, larger requests amortise TLS and request latency, which is what a sequential read of a
   large file is dominated by.
 
-**Parallel fetching, because one stream will not fill the link.** A single HTTPS stream does not
-reach a gigabit, so the read path is a **fetch pool**: N workers (default 8, tunable) issuing
-concurrent range requests for *distinct* chunks of the same file. Completion order does not matter,
-because each chunk is written into the sparse cache file at its own offset and the `ranges` table is
-updated per chunk. This is the single most important performance decision in the design, given §1.1.
+**Parallel fetching is not the point. Measured 2026-11-17, and this paragraph used to say the
+opposite.** It asserted that one stream will not fill the link, made a fetch pool of 8 workers "the
+single most important performance decision in the design", and reasoned from a prior measured
+against a different service at 1.8 MB/s per connection.
 
-Prior, not prediction: this workspace has measured exactly this shape against another large-file
-host — roughly 1.8 MB/s per connection, scaling close to linearly with concurrent streams. That was
-a different service, so it sets the expectation that per-connection throughput is the limit and
-parallelism is the lever, and nothing more. **M2 measures Drive itself** (§11.2) and sets the
-default from the result rather than from this paragraph. Google serves HTTP/2, where many streams
-on one connection can be flow-control bound rather than bandwidth bound, so the transport is
-configured for several connections and the measurement compares the two.
+Against Drive on the target machine, a **single** range request averages **65.5 MB/s** on
+`jonny-precision` over Wi-Fi, running at or above the link control beside it, and parallel requests
+show no effect that clears the spread. Jonny's stated acceptance bar is **60 MB/s on that machine's
+Wi-Fi**, with the explicit note that the rate varies with household use and need not be chased:
+
+> "If we can consistently achieve 60MB/sec over Wi-Fi on the precision I'll be happy with that.
+> Don't stress about exactly what the speed is because it varies according to other users on the
+> network." - 2026-11-17
+
+**One stream already clears that bar.** So the read path fetches in chunks, sequentially, with a
+small pool (**default 2**) to overlap request latency with transfer rather than to multiply
+bandwidth. The pool size stays tunable because it costs nothing to keep, but no part of the design
+may be justified by it, and it is not worth engineering effort.
+
+What remains unmeasured is whether a single stream clears the bar on a *wired gigabit* link, where
+Google's own Windows client is observed to use four parallel streams. That question is parked, not
+answered: it would need an idle wired machine, and on the machine this is actually for it does not
+arise. See `docs/measurements.md`.
 
 **First bytes before whole chunks.** A video player asking for the first 64 KiB must not wait for
 16 MiB to land. The chunk containing the request is fetched first and **streamed through to the
@@ -950,10 +960,13 @@ Numbered so they can be cited and reversed on purpose rather than by drift.
 13. **A `.deb`**, with a `systemd --user` service. Not Flatpak, not AppImage (§6.14).
 14. **Bring-your-own OAuth client**, reusing `an existing Cloud project` with a second Desktop client
     (§6.1). No client ID will ever ship in this repository.
-15. **The read path is a parallel fetch pool** of concurrent range requests, with 16 MiB chunks
-    sized by the quota meter, partial chunks streamed through to the reader, and readahead only for
-    handles that have proved sequential. The worker count is set by measurement in M2, not by this
-    document (§6.6).
+15. **The read path is chunked and mostly sequential**, with 16 MiB chunks sized by the quota meter,
+    partial chunks streamed through to the reader, and readahead only for handles that have proved
+    sequential. A small pool (default 2) overlaps request latency with transfer. **Revised
+    2026-11-17**: this previously specified a parallel fetch pool of 8 as the design's most
+    important performance decision. Measurement showed one stream averaging 65.5 MB/s against an
+    acceptance bar of 60, with parallelism showing no effect that clears the spread, so the pool is
+    a latency convenience and nothing may be justified by it (§6.6, `docs/measurements.md`).
 16. **Upload bytes are treated as the scarce resource**: hash-compare and skip unchanged content,
     never upload for a metadata-only change, coalesce repeated saves, one transfer at a time capped
     at 80 % of the uplink, and the cost shown before it is spent (§6.7). Chunked storage of large
@@ -1036,11 +1049,13 @@ to assume.
    redirect to a `googleusercontent.com` host, does the range survive the redirect, and are a
    file's bytes stable between two range requests? §6.2 handles the 200 case defensively either
    way.
-2a. **How many parallel range requests it takes to fill a gigabit, and whether separate connections
-   beat HTTP/2 streams on one.** The most consequential measurement in the project, since §1.1
-   makes read throughput the hot path: throughput against 1, 2, 4, 8, 16 workers, at 4, 16 and
-   64 MiB chunks, with the quota units spent recorded beside each. It sets the default worker count
-   and may move the chunk size. Measured in M2 on `jonny-precision`, over its own link.
+2a. ~~**How many parallel range requests it takes to fill a gigabit.**~~ **Answered on the machine
+   that matters, and closed, 2026-11-17.** On `jonny-precision` over Wi-Fi a single range request
+   averages 65.5 MB/s against an acceptance bar of 60, and 1, 2, 4, 8 and 16 workers do not separate
+   by more than the spread of repeats. This was called "the most consequential measurement in the
+   project"; it turned out to be a question about a bottleneck that is not there, on a link that
+   varies with household use anyway. The wired-gigabit version of it is parked, not answered. See
+   `docs/measurements.md`.
 2b. **The real sustained uplink**, measured rather than assumed from "about 50 Mbit", since the
    upload cap, the time estimates and the debounce thresholds are all derived from it.
 3. **Do `modifiedTime` and `createdTime` stick** on create and on update?

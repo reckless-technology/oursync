@@ -58,14 +58,25 @@ never `-f`), check for `Runner.Worker`, and read the load again **immediately be
 sample**. Reading it once at the start of a session is how this went wrong — it was 0.00 at 08:32
 and CI started at 08:35:32, three minutes later, and ran for the next half hour.
 
-So §6.6's premise — that one stream will not fill a fast downlink — is **still open**. Jonny notes
-that Google's own Windows client fetches with four parallel streams, which is a real signal worth
-testing rather than assuming either way. The next run needs an **idle wired machine** and about
-twenty alternating samples per arm, enough to resolve a 10-30% difference; three samples cannot.
+**The throughput question is closed, by Jonny, 2026-11-17**:
 
-**What is untouched, and is the strongest remaining case for the project either way**: small-file
-and metadata latency over a 5 TB corpus — listings, `stat` storms, opening a file from an
-application. Throughput on one large file says nothing about it.
+> "If we can consistently achieve 60MB/sec over Wi-Fi on the precision I'll be happy with that.
+> Don't stress about exactly what the speed is because it varies according to other users on the
+> network. My wife and kids also use the Internet. I think you're prematurely optimizing for a
+> problem that in real world conditions isn't an issue."
+
+**60 MB/s on precision's Wi-Fi is the bar, and a single stream already clears it** (65.5 mean), as
+does `rclone mount` at its defaults (62.3). §6.6 has been rewritten: the fetch pool is now a small
+latency convenience with a default of 2, **nothing in the design may be justified by parallelism**,
+and §11.2a is closed. Do not reopen the wired-gigabit version of this. It was parked deliberately,
+on a link that varies with household use, for a bottleneck that is not there.
+
+**What is actually undecided is whether this project should exist at all.** rclone meets the
+throughput bar today. What it does not give is pinning, per-file status in Nemo, and whatever the
+real pain of a 5 TB corpus turns out to be — small-file and metadata latency, listings, `stat`
+storms, opening a file from an application. That last is still unmeasured, and it is the only
+remaining technical argument for building anything. If it is also fine, the honest answer is a
+tuned `rclone mount` plus a thin status layer, or nothing.
 
 [docs/plan.md](docs/plan.md) has the build order for if it does go ahead; start at M0, and do not
 skip ahead — M0 and M1 exist to settle the refresh-token cap and the name mapping against real data
