@@ -14,12 +14,48 @@ evidence for each decision and, in §9, the decisions themselves as a numbered l
 proposing anything structural. §11 holds the questions that are genuinely open, each with the live
 test that would settle it — if you are about to assume one of those, run the test instead.
 
-## Status
+## Status: PAUSED, and the premise is unverified. Read this before writing any code.
 
-Design only. No code has been written. [docs/plan.md](docs/plan.md) has the build order; start at
-M0 unless told otherwise, and do not skip ahead — M0 and M1 exist to settle the two riskiest
-assumptions (the refresh-token cap, and the name mapping against real data) before anything is
-built on them.
+**Paused by Jonny on 2026-11-17**, on a question he raised and was right to raise: does anything
+that already exists do this job?
+
+What that question turned up:
+
+- **GNOME's own Drive integration is a dead end.** `gnome-online-accounts` plus the `gvfsd-google`
+  GVfs backend is installed and working on `jonny-precision` — Mint ships it deliberately, with
+  its own patched panel — but GNOME 50 hid the Google "Files" toggle in March 2026, Debian dropped
+  the backend in gvfs 1.57.2-3 because "it relies on libgdata, which is de facto unmaintained", and
+  libgdata is archived. It also would not have served: one sequential GET at a time, no content
+  cache, no `mmap` handler in the FUSE bridge, native docs unopenable, duplicate names hidden,
+  permanent deletes. Do not build on it and do not wait for its rewrite.
+- **`rclone mount --vfs-cache-mode full` is the real incumbent**, and it already does most of what
+  §6.6 describes: on-demand range reads into a sparse persistent cache, range tracking, LRU
+  eviction, one mount per remote, and a normal FUSE mount any application can use. This was
+  under-weighted in the original research, which compared against rclone's defaults rather than a
+  tuned configuration.
+- **So the remaining justification is narrower than the design implies**: pinning ("available
+  offline"), per-file status in Nemo, cross-account bandwidth scheduling, and — the one that
+  decides whether this is a product or a plugin — **whether a parallel fetch pool beats rclone's
+  chunked sequential readahead on a gigabit link**. rclone's `--multi-thread-streams` applies to
+  `copy`, not to mount reads, so there is a real possibility here, and it is unmeasured.
+
+**The measurement that unblocks this**, and nothing more should be built before it: install rclone
+on `jonny-precision` (done — v1.76.0 at `/usr/local/bin/rclone`), authorise a **read-only** Drive
+remote, then compare, on the same large file over the same link: rclone mount read throughput, the
+link's ceiling via a multi-threaded copy, and a parallel-range prototype against the Drive API.
+`tools/evaluate-gvfs-google.sh` measures any mount point the same way and is staged there.
+
+It stopped at the authorisation: `rclone authorize` needs one browser consent, Jonny was away from
+his desk, Chrome's Claude extension is installed on the Legion but its side panel is not signed in,
+and computer-use cannot click into a browser (browsers are read-tier). Nothing was authorised — no
+`rclone.conf`, no token, no Cloud project touched.
+
+**If the throughput measurement favours rclone, this repository should become a thin pinning and
+status layer, or be abandoned.** Say so plainly rather than building the design as written.
+
+[docs/plan.md](docs/plan.md) has the build order for if it does go ahead; start at M0, and do not
+skip ahead — M0 and M1 exist to settle the refresh-token cap and the name mapping against real data
+before anything is built on them.
 
 ## Decisions not to reopen without reading why
 

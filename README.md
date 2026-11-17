@@ -13,9 +13,13 @@ It is built for a particular shape of use: a corpus far larger than the local di
 connection, and reading much more than writing. The read path is parallel and tuned to fill a fast
 downlink; the write path is built to spend as few upload bytes as it can.
 
-**Status: design complete, no code yet.** Read [docs/design.md](docs/design.md) for the
-architecture and the evidence behind each decision, and [docs/plan.md](docs/plan.md) for the build
-order. Nothing in this repository runs.
+**Status: paused, and the premise is being checked.** The design is complete and the foundation is
+written, but before more is built there is one measurement outstanding: whether `rclone mount
+--vfs-cache-mode full`, which already streams Drive on demand into a sparse cache, saturates a
+gigabit link on a single large file. If it does, most of this design is redundant and what is left
+is a pinning and status layer. [CLAUDE.md](CLAUDE.md) has the full state and what resumes it;
+[docs/design.md](docs/design.md) has the architecture and the evidence behind each decision, and
+[docs/plan.md](docs/plan.md) the build order. Nothing here runs yet.
 
 ## Why it exists
 
