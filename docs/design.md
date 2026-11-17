@@ -31,7 +31,7 @@ load-bearing somewhere below.
 
 | | |
 |---|---|
-| Data in Drive | **~5 TB** — roughly 19× the free space on the target machine |
+| Data in Drive | **~5 TB**, on his **personal** Google account — roughly 19× the free space on the target machine |
 | Link | **~1 Gbit down, ~50 Mbit up.** Asymmetric by a factor of 20 |
 | Dominant use | **Streaming reads.** The great majority of access is read-only viewing |
 | Writes | Occasional, and sometimes to large files |
@@ -50,6 +50,17 @@ Four consequences follow, and they are the spine of the rest of this document:
 4. **The metadata set is large.** 5 TB is plausibly 10⁵–10⁶ files, which changes the ingest,
    the memory model and the inode strategy from "walk the tree" to something that paginates,
    resumes and does not hold the tree in RAM (§6.3, §6.5).
+
+**The corpus is on a consumer account, confirmed 2026-11-17**, which is worth stating because it was
+checked and because it closes off a tempting escape route. Jonny has two Chrome profiles and two
+Google accounts — `the personal Google account` (personal) and a Workspace one — and the 5 TB is on the
+personal one. Had it been on the Workspace account, §6.1's auth problems would largely have
+dissolved: an **Internal** OAuth audience removes the unverified-app warning, the 100-user cap and
+the seven-day refresh-token question in one go, and shared drives and domain-wide delegation become
+available. None of that applies. So §6.1 stands exactly as written — the restricted `drive` scope, a
+client ID from his own Cloud project under the personal-use exemption, and the seven-day question
+settled empirically at first consent by reading `refresh_token_expires_in`. Do not reopen this
+hoping for a Workspace shortcut.
 
 **Language.** Go 1.26.x, Jonny's choice on 2026-11-16 over Rust and C++20. The reasoning is in
 §2.3 and it held up: the two libraries the project leans on both turned out to do more than
