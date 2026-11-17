@@ -56,6 +56,14 @@ cover:
 vet:
 	$(GO) vet $(PKG)
 
+# Prove a Linux build from any host. CGO_ENABLED=0 is load-bearing on Windows, where `go env CC`
+# may point at a native clang: without it the cross-build tries to compile runtime/cgo and fails on
+# a missing grp.h, which looks like a code error and is not one. Aqueduct uses no cgo anywhere.
+crosscheck:
+	CGO_ENABLED=0 GOOS=linux $(GO) build $(PKG)
+	CGO_ENABLED=0 GOOS=linux $(GO) vet $(PKG)
+	@echo "linux build and vet clean"
+
 fmt:
 	$(GO) fmt $(PKG)
 

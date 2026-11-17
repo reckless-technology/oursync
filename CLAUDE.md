@@ -62,6 +62,16 @@ make cover          # statement coverage, gated
 Go, so `gofmt`, not clang-format — the 22.1.8 pin in the working-practice skill does not apply
 here. Build trees go under `build/`, as everywhere in this workspace.
 
+**Checking a Linux build from Windows needs `CGO_ENABLED=0`.** This PC has `go env CC` set to
+MSYS2's clang (pawnstar-go's race detector needs it), so a bare `GOOS=linux go build` tries to
+compile `runtime/cgo` with a Windows clang and dies on `grp.h`. Aqueduct uses no cgo at all — that
+is the point of go-fuse and the pure-Go SQLite driver — so the right invocation is
+`CGO_ENABLED=0 GOOS=linux go build ./...`, which `make crosscheck` runs.
+
+**Do not edit `go.mod` or `go.sum`.** Every dependency the project needs is already required at a
+pinned version, held in place by `internal/deps` so `go mod tidy` cannot drop one before real code
+imports it. A new dependency is a decision — raise it rather than adding it.
+
 **The FUSE tests cannot run on Windows and will not run in CI.** They need `/dev/fuse` and a real
 mount. Run them on `jonny-precision` (`ssh -4 jonny@jonny-precision.local`, Mint 22.3, kernel
 7.0.0-42, Go 1.26.9 at `/usr/local/go/bin/go` which is **not** on the non-interactive PATH, and
