@@ -25,7 +25,7 @@ type FileID string
 // DriveID identifies a shared drive. The empty value means the account's own My Drive.
 type DriveID string
 
-// Ino is the inode number Aqueduct presents to the kernel. Allocated by the store and stored, never
+// Ino is the inode number OurSync presents to the kernel. Allocated by the store and stored, never
 // derived from a FileID: a hash would collide, and a collision here is data corruption rather than
 // a glitch.
 type Ino uint64
@@ -40,7 +40,7 @@ const (
 	nativePrefix = "application/vnd.google-apps."
 )
 
-// Node is one entry in a Drive tree, as Aqueduct stores it.
+// Node is one entry in a Drive tree, as OurSync stores it.
 type Node struct {
 	ID       FileID
 	DriveID  DriveID // empty for My Drive
@@ -84,7 +84,7 @@ type Node struct {
 // IsFolder reports whether the node is a Drive folder.
 func (n Node) IsFolder() bool { return n.MIME == MIMEFolder }
 
-// IsShortcut reports whether the node is a Drive shortcut, which Aqueduct presents as a symlink.
+// IsShortcut reports whether the node is a Drive shortcut, which OurSync presents as a symlink.
 func (n Node) IsShortcut() bool { return n.MIME == MIMEShortcut }
 
 // IsNative reports whether the node is a Google-native document — a Doc, Sheet, Slide, Drawing or
@@ -95,7 +95,7 @@ func (n Node) IsNative() bool {
 	return strings.HasPrefix(n.MIME, nativePrefix) && !n.IsFolder() && !n.IsShortcut()
 }
 
-// IsStreamable reports whether the node has content Aqueduct can fetch by byte range.
+// IsStreamable reports whether the node has content OurSync can fetch by byte range.
 func (n Node) IsStreamable() bool { return !n.IsFolder() && !n.IsShortcut() && !n.IsNative() }
 
 // PinMode is a node's availability policy, inherited by descendants unless overridden.

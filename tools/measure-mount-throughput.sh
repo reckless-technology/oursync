@@ -5,7 +5,7 @@
 # This is the incumbent's real number. The range-fetch benchmark says what the API and the link can
 # do; this says how much of that survives rclone's VFS, which is what a user would actually get by
 # running `rclone mount` today. The gap between the two - if there is one - is the only thing
-# Aqueduct's read path could win, and tuning flags may close it without writing any code at all.
+# OurSync's read path could win, and tuning flags may close it without writing any code at all.
 #
 # Each configuration is measured from a cold cache, because a warm one measures the local disk.
 # The mount is always torn down, including on failure, and the cache directory is emptied between
@@ -21,8 +21,8 @@ RPATH="${TARGET#*:}"
 READ_MIB="${READ_MIB:-1024}"
 SKIP_MIB="${SKIP_MIB:-1024}"
 
-MNT="$HOME/aqueduct-measure/mnt"
-CACHE="$HOME/aqueduct-measure/cache"
+MNT="$HOME/oursync-measure/mnt"
+CACHE="$HOME/oursync-measure/cache"
 CONTROL_BYTES=52428800
 CONTROL_URL="https://speed.cloudflare.com/__down?bytes=$CONTROL_BYTES"
 

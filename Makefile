@@ -1,4 +1,4 @@
-# Aqueduct build wrapper.
+# OurSync build wrapper.
 #
 # Plain Go 1.26.x — no build tags, no experiments, no cgo. The FUSE layer talks to /dev/fuse
 # directly through go-fuse and the SQLite driver is pure Go, so `go build` needs no C compiler and
@@ -15,11 +15,11 @@ GO ?= go
 PKG := ./...
 OUT := build
 
-DAEMON := aqueductd
-CLI    := aqueduct
+DAEMON := oursyncd
+CLI    := oursync
 
 VERSION := $(shell tools/version.sh)
-LDFLAGS := -X github.com/reckless-technology/aqueduct/internal/build.version=$(VERSION)
+LDFLAGS := -X github.com/reckless-technology/oursync/internal/build.version=$(VERSION)
 
 # Statement coverage gate. One place the number is written; CI's coverage job runs this target.
 COVER_MIN ?= 85
@@ -58,7 +58,7 @@ vet:
 
 # Prove a Linux build from any host. CGO_ENABLED=0 is load-bearing on Windows, where `go env CC`
 # may point at a native clang: without it the cross-build tries to compile runtime/cgo and fails on
-# a missing grp.h, which looks like a code error and is not one. Aqueduct uses no cgo anywhere.
+# a missing grp.h, which looks like a code error and is not one. OurSync uses no cgo anywhere.
 crosscheck:
 	CGO_ENABLED=0 GOOS=linux $(GO) build $(PKG)
 	CGO_ENABLED=0 GOOS=linux $(GO) vet $(PKG)

@@ -1,4 +1,4 @@
-# Aqueduct
+# OurSync
 
 A streaming Google Drive filesystem for Linux Mint Cinnamon.
 
@@ -24,7 +24,7 @@ were void and why.
 
 What rclone genuinely lacks is **pinning** — its cache is eviction-based, with no way to say "keep
 this one". [`rclone/`](rclone/) closes that gap and nothing else: a union of a local pin directory
-over the Drive remote, a mount, a `aqueduct pin`/`unpin` command, two Nemo menu entries and a login
+over the Drive remote, a mount, a `oursync pin`/`unpin` command, two Nemo menu entries and a login
 service. It is installed and tested on `jonny-precision`.
 
 Everything below, and in [docs/design.md](docs/design.md) and [docs/plan.md](docs/plan.md),
@@ -37,7 +37,7 @@ repository. The Go foundation under `internal/` is unused; removing it is a deci
 
 Google ships a desktop client for Windows and macOS and none for Linux. The Windows client's
 streaming drive is built on the Cloud Filter API, where the kernel owns placeholder files and calls
-the provider back to fill them. Linux has no equivalent, so Aqueduct is a FUSE filesystem instead —
+the provider back to fill them. Linux has no equivalent, so OurSync is a FUSE filesystem instead —
 see [design.md §2.1](docs/design.md) for the measurement that settled that, including a live test
 of kernel 7.0's `fanotify` pre-content hooks, which work and are still the wrong primary mechanism.
 
@@ -51,11 +51,11 @@ Said up front, because these are platform limits rather than things left undone:
   stream to serve. They appear as small stub files that open in the browser, or optionally as
   read-only exports capped at 10 MB by the API.
 - **No "Computers" backup roots.** The API offers no way to discover them.
-- **No differential upload — Google's own client can do this and Aqueduct cannot.** Since October
+- **No differential upload — Google's own client can do this and OurSync cannot.** Since October
   2024, Drive for desktop uploads only the changed parts of a large file. No public Drive API
   exposes that: there is no write-at-offset, no append, no patch, no block or signature endpoint,
   and a revision cannot be made from a diff. So editing four bytes of a 2 GB file re-uploads 2 GB.
-  Aqueduct does everything it can short of the impossible — it hashes before uploading and skips
+  OurSync does everything it can short of the impossible — it hashes before uploading and skips
   content that has not really changed, coalesces repeated saves, never uploads for a rename or a
   move, rate-limits the transfer so it does not strangle the rest of your connection, and tells you
   what a transfer will cost before it spends it. It cannot send a delta, and nor can anything else
@@ -63,14 +63,14 @@ Said up front, because these are platform limits rather than things left undone:
 
 ## The one-time Google setup
 
-Aqueduct will never ship a built-in OAuth client ID. A client that can see your whole Drive needs
+OurSync will never ship a built-in OAuth client ID. A client that can see your whole Drive needs
 Google's **restricted** `drive` scope, and an app distributing its own client ID with that scope
 needs OAuth verification plus an annually renewed third-party security assessment. Using an OAuth
 client from your own Google Cloud project falls under Google's documented personal-use exemption
 instead — no verification, no assessment, and a per-project API quota nobody else is sharing.
 
 The cost is one console visit, once, and clicking through an "unverified app" warning when you
-consent. `aqueduct auth` walks it.
+consent. `oursync auth` walks it.
 
 ## Licence
 

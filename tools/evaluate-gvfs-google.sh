@@ -125,7 +125,7 @@ dd if="$BIG" of=/dev/null bs=1M count=1 iflag=direct 2>&1 | tail -2
 
 if [ "$WRITE" -eq 1 ]; then
     say "WRITE TESTS - creating one small file in the Drive root, then deleting it"
-    T="$MOUNT/aqueduct-write-test-$$.bin"
+    T="$MOUNT/oursync-write-test-$$.bin"
     dd if=/dev/urandom of=/tmp/aq-write-test.bin bs=1M count=4 2>/dev/null
     echo "-- create 4 MB:"
     time cp /tmp/aq-write-test.bin "$T" 2>&1

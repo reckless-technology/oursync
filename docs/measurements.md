@@ -14,7 +14,7 @@ project's whole read path rests on one proposition:
 
 > N concurrent range requests to Drive are materially faster than one.
 
-If that is false, Aqueduct's read path wins nothing and the repository should become a thin pinning
+If that is false, OurSync's read path wins nothing and the repository should become a thin pinning
 and status layer over rclone, or be abandoned. `CLAUDE.md` says to say so plainly, so this document
 exists to make the saying possible either way.
 
@@ -27,10 +27,10 @@ Two OAuth clients were used, and the difference between them is itself a finding
 | client | notes |
 |---|---|
 | rclone's shared client ID | warns on every call that it is "being retired and will stop working during 2026". Shared by every rclone user. |
-| our own, Cloud project `aqueduct-515016` | Desktop client "Aqueduct desktop", External/Testing, one test user. Created 2026-11-17. |
+| our own, Cloud project `oursync-515016` | Desktop client "OurSync desktop", External/Testing, one test user. Created 2026-11-17. |
 
-The credential is at `~/.config/aqueduct/client_secret.json` on `jonny-precision` and in
-`~/Downloads/aqueduct-client-secret.json` on the Legion. **No client ID is in this repository, and
+The credential is at `~/.config/oursync/client_secret.json` on `jonny-precision` and in
+`~/Downloads/oursync-client-secret.json` on the Legion. **No client ID is in this repository, and
 none ever will be** - see the README.
 
 The authorised token carried no `refresh_token_expires_in`, which is weak evidence against the

@@ -1,4 +1,4 @@
-# Aqueduct — design
+# OurSync — design
 
 A streaming Google Drive filesystem for Linux Mint Cinnamon, with the features Jonny uses on
 Windows: a virtual drive that holds no local copy until something reads a file, per-folder
@@ -155,7 +155,7 @@ an optimisation with a working fallback, never a requirement.**
 **Attribute caching.** go-fuse's `Server` carries `InodeNotify`, `EntryNotify`, `DeleteNotify`,
 `PruneNotify` and `InodeNotifyStoreCache`. That resolves the usual FUSE dilemma — short attribute
 timeouts cost a round trip on every `stat`, long ones go stale against a store that changes
-remotely. Aqueduct takes **long timeouts plus active invalidation**: the change poller (§6.5)
+remotely. OurSync takes **long timeouts plus active invalidation**: the change poller (§6.5)
 pushes an invalidation for each node it learns has changed. Stale windows then track the poll
 interval rather than the timeout, and `ls -la` of a cached directory costs nothing. This is
 strictly better than the 60-second metadata cache of `google-drive-ocamlfuse` or rclone's
@@ -193,12 +193,12 @@ cannot back a filesystem view of existing content.
 
 Publishing an app that requests a restricted scope requires OAuth verification and, where the app
 moves restricted data "from or through a third-party server", the CASA security assessment,
-renewed annually. Aqueduct has no server, and in any case the route taken is the documented
+renewed annually. OurSync has no server, and in any case the route taken is the documented
 **personal-use exemption**: the app is used by its owner with an OAuth client from his own Cloud
 project. No verification, no assessment, no user cap that matters, and a per-project quota that
 nobody else is sharing.
 
-This is a **product constraint, not just a code one**: Aqueduct can never ship a built-in client
+This is a **product constraint, not just a code one**: OurSync can never ship a built-in client
 ID. First run therefore has to walk the user through creating one. Jonny already has a usable
 project — see §6.1.
 
@@ -296,12 +296,12 @@ A Doc, Sheet or Slide has no byte stream: no `alt=media`, no ranges, no checksum
 ```
                     ┌──────────────────────────────────────────────┐
   Nemo extension ──►│                                              │
-  (emblems, menu)   │                aqueductd                     │
+  (emblems, menu)   │                oursyncd                     │
                     │                                              │
   Tray applet ─────►│  ┌────────────┐      ┌────────────────────┐  │
   (XAppStatusIcon)  │  │  control   │      │   sync engine      │  │
                     │  │  plane     │      │  change poller     │  │
-  aqueduct CLI ────►│  │ (unix sock)│      │  local scanner     │  │
+  oursync CLI ────►│  │ (unix sock)│      │  local scanner     │  │
                     │  └────────────┘      │  upload queue      │  │
                     │         │            └─────────┬──────────┘  │
                     │         ▼                      ▼             │
@@ -344,9 +344,9 @@ possible at all.
 ## 5. Layout
 
 ```
-aqueduct/
-  cmd/aqueductd/        the daemon
-  cmd/aqueduct/         the CLI
+oursync/
+  cmd/oursyncd/        the daemon
+  cmd/oursync/         the CLI
   internal/account/     an account's identity, label, paths and lifecycle; the registry of them
   internal/auth/        OAuth loopback, token storage in the keyring
   internal/drive/       typed client wrapper, retrying transport, range reads, exports
@@ -380,7 +380,7 @@ consent URL to the user's browser; on the target that is `google-chrome.desktop`
 target and owns `org.freedesktop.secrets` on the session bus, with Cinnamon providing the prompter
 (checked 2026-11-16). The daemon talks D-Bus directly (`godbus/dbus`) rather than linking
 libsecret through cgo. Fallback, for a machine with no Secret Service: a file at
-`~/.config/aqueduct/token.json`, created 0600, with the daemon warning once that the token is on
+`~/.config/oursync/token.json`, created 0600, with the daemon warning once that the token is on
 disk in the clear. (`os.Chmod` to 0600 is honoured on Linux; the note in the YouTube skill about
 it being a no-op applies to Windows and NTFS ACLs, not here.)
 
@@ -410,14 +410,14 @@ Two things follow, and one is unresolved:
 
   **The test is same-day, not seven days**, which is what makes this cheap to settle: the token
   response carries `refresh_token_expires_in`, and a value near **604799** means the cap is still
-  on. So `aqueduct auth --show-expiry` prints that field, and `aqueduct doctor` warns when a
+  on. So `oursync auth --show-expiry` prints that field, and `oursync doctor` warns when a
   refresh token is capped. We will know within a minute of consenting, both before and after any
   publish.
 
   **The daemon is built for the capped case regardless**, because three other things can also kill
   a refresh token (user revocation, six months unused, and the hundred-live-tokens-per-client cap):
   on `invalid_grant` it keeps the mount up and read-only from cache, raises a notification naming
-  `aqueduct auth` as the repair, and never presents an empty or broken tree. A weekly re-auth would
+  `oursync auth` as the repair, and never presents an empty or broken tree. A weekly re-auth would
   be an irritation, not a failure.
 
 **Routes that do not exist**, checked 2026-11-16 and recorded so they are not re-explored. A
@@ -445,7 +445,7 @@ client will not do any of this:
   but real: a hot file blocks for roughly a day), `cannotDownloadAbusiveFile` (needs
   `acknowledgeAbuse`, owner only, and the user must be asked rather than it being set silently).
 - **Observability.** Per-method call counts, units spent, retry counts and latency, readable via
-  `aqueduct status --api` — because the first question about any misbehaviour will be "what is it
+  `oursync status --api` — because the first question about any misbehaviour will be "what is it
   asking Google for?"
 
 Range reads get a helper that sets `Range` via `FilesGetCall.Header()`, calls `Download()`, and
@@ -457,7 +457,7 @@ assumed away (the docs promise the header is honoured but never promise a 206).
 
 SQLite (`modernc.org/sqlite`, pure Go — no cgo, so cross-compilation and the `.deb` stay simple),
 WAL mode, **one database per account** at
-`~/.local/share/aqueduct/accounts/<account>/metadata.db` (§6.15). Per-account rather than one shared
+`~/.local/share/oursync/accounts/<account>/metadata.db` (§6.15). Per-account rather than one shared
 database with an account column: change tokens, ingest state and ids then never have to be
 qualified, a query cannot accidentally span accounts, and removing an account is deleting a
 directory.
@@ -511,7 +511,7 @@ Rules, in order:
 
 1. `/` becomes U+2215 DIVISION SLASH (`∕`). Visible, copyable, and not a path separator.
 2. A name that is exactly `.` or `..` becomes `~.` / `~..`.
-3. A trailing space or dot is kept — Linux permits both — but flagged in `aqueduct status` as a
+3. A trailing space or dot is kept — Linux permits both — but flagged in `oursync status` as a
    name that will break if the file is ever copied to Windows or a FAT volume.
 4. A name longer than 255 bytes is truncated on a UTF-8 boundary with a `~N` discriminator.
 5. **Duplicates:** the first-seen node keeps the plain name; later ones get ` (2)`, ` (3)` by
@@ -534,7 +534,7 @@ match what a user expects to see:
 ```
 
 Trash is not mounted (deleting goes to Drive's trash, and the web UI is the place to dig through
-it). "Computers" roots are not mounted, because the API offers no way to discover them; `aqueduct
+it). "Computers" roots are not mounted, because the API offers no way to discover them; `oursync
 mount-id <id>` can graft one in by hand if Jonny ever wants it.
 
 **Shortcuts become symlinks** to the target's path inside the mount where the target is known, and
@@ -552,7 +552,7 @@ that changed during a long ingest is picked up by the first poll rather than mis
 
 Cost, for calibration: a million files is a thousand pages at 100 units each — 100,000 units, a
 third of one minute's budget, so quota is not the limit. Wall-clock and Drive's own paging latency
-are, and the ingest therefore reports progress (`aqueduct status` and the tray) and never blocks the
+are, and the ingest therefore reports progress (`oursync status` and the tray) and never blocks the
 mount: the mount can come up and serve what has been ingested while the rest arrives.
 
 Then, one poller per change token: My Drive, plus each shared drive (their change ids are per-drive,
@@ -572,7 +572,7 @@ Three rules that matter:
 After each applied page, the poller pushes kernel invalidations for the affected nodes
 (`EntryNotify` for a rename or a move, `InodeNotify` for content or size, `DeleteNotify` for a
 trash) and drops any cached ranges whose `md5`/`version` moved. Poll interval: 30 s active, backing
-off to 5 min after an idle hour, and immediate on a local write or on `aqueduct sync`.
+off to 5 min after an idle hour, and immediate on a local write or on `oursync sync`.
 
 ### 6.6 The read path
 
@@ -630,7 +630,7 @@ rather than stalling at every chunk boundary. The window is per handle, so two f
 once share the pool fairly. Random access stays at one chunk and never earns readahead — a database
 file or a seeking player would otherwise fetch gigabytes nobody asked for.
 
-**Cache.** One sparse file per node at `~/.cache/aqueduct/content/<id-prefix>/<id>`, created with
+**Cache.** One sparse file per node at `~/.cache/oursync/content/<id-prefix>/<id>`, created with
 `ftruncate` to the full size, written at the right offsets. The `ranges` table is the authority on
 what is present — a hole in the file is indistinguishable from real zeros, so the file is never
 asked. Rows are coalesced on insert.
@@ -709,7 +709,7 @@ much each is worth:
    daemon you forget about and one you turn off.
 5. **Say what it will cost, before it costs it.** An upload above a threshold (default 1 GB) raises
    a notification naming the file, the bytes and the estimate — "5.2 GB, about 16 minutes" — with a
-   cancel. `aqueduct status` shows the queue, the current transfer's progress and the time
+   cancel. `oursync status` shows the queue, the current transfer's progress and the time
    remaining. Given that a 50 GB edit is a two-and-a-half-hour transfer, the user finding out from
    a progress display rather than from a slow internet connection is most of the usability of this
    feature.
@@ -725,7 +725,7 @@ which is most of the point of keeping them in Drive at all. It remains available
 opt-in for one nominated folder, and it is noted in §11 rather than built.
 
 **fsync** flushes to the cache file and returns. It does **not** wait for the upload: an fsync that
-blocked on a 2 GB upload would hang every editor. `aqueduct status` shows the queue, and quitting
+blocked on a 2 GB upload would hang every editor. `oursync status` shows the queue, and quitting
 the daemon drains it (with a timeout, and the queue survives in SQLite regardless).
 
 ### 6.8 Google-native documents
@@ -755,7 +755,7 @@ Three states, per node, inherited by descendants unless overridden:
 | `offline` | "Available offline". Hydrated eagerly, kept hydrated, never evicted, re-fetched when the change feed says it moved. |
 | `excluded` | Not present in the mount at all. Its metadata is still tracked (so the feed stays consistent) but it is invisible and costs no space. |
 
-Set from the CLI (`aqueduct pin <path>`), the Nemo context menu, or a config file. `offline` on a
+Set from the CLI (`oursync pin <path>`), the Nemo context menu, or a config file. `offline` on a
 folder walks it and queues hydration at low priority, reporting progress in the tray.
 
 **Pinning is checked against the disk before it starts.** With 5 TB in Drive and 267 GB free, "make
@@ -764,7 +764,7 @@ metadata to prevent that is already in the database. So a pin sums the subtree's
 refuses outright when it will not fit — naming the subtree's size, the free space and the shortfall
 — rather than hydrating until `ENOSPC`. Pinned bytes are **not** part of the LRU budget, because
 pinned data is not a cache; they are accounted separately, and the pin is refused if pinned plus
-cache would breach `--cache-min-free`. `aqueduct status` reports both totals.
+cache would breach `--cache-min-free`. `oursync status` reports both totals.
 
 ### 6.10 Mirror mode
 
@@ -812,7 +812,7 @@ full, conflict created, upload failed terminally, mount lost.
 
 ### 6.13 Control plane and CLI
 
-A unix socket at `$XDG_RUNTIME_DIR/aqueduct.sock`, mode 0600, JSON lines. `aqueduct` subcommands:
+A unix socket at `$XDG_RUNTIME_DIR/oursync.sock`, mode 0600, JSON lines. `oursync` subcommands:
 `auth`, `status`, `mount`, `unmount`, `pin`, `unpin`, `exclude`, `sync`, `mirror add|remove|list`,
 `conflicts`, `cache stats|evict`, `quota`, `logs`, `doctor`.
 
@@ -823,7 +823,7 @@ wrong rather than that something is.
 
 ### 6.14 Service and packaging
 
-A `systemd --user` unit, `aqueductd.service`, `Restart=on-failure`, wanted by
+A `systemd --user` unit, `oursyncd.service`, `Restart=on-failure`, wanted by
 `graphical-session.target`. Linger is off on the target, so the daemon stops at logout, which is
 correct for a desktop filesystem. `fusermount3 -u` runs in `ExecStop`, and the mount is created
 with `auto_unmount` so a daemon death does not leave a hung mount point.
@@ -857,13 +857,13 @@ workers; two accounts with queued uploads still upload one file at a time. The c
 round — per-account pools — would let two accounts each saturate the uplink and make both slow.
 
 ```
-~/.local/share/aqueduct/accounts/<label>/metadata.db
-~/.cache/aqueduct/accounts/<label>/content/...
+~/.local/share/oursync/accounts/<label>/metadata.db
+~/.cache/oursync/accounts/<label>/content/...
 ~/Drive/<label>/                                     one mount per account
 ```
 
-The label is the user's, not Google's: `aqueduct account add --label work` runs the consent flow and
-mounts at `~/Drive/work`. `aqueduct account list|remove`, and every other subcommand takes
+The label is the user's, not Google's: `oursync account add --label work` runs the consent flow and
+mounts at `~/Drive/work`. `oursync account list|remove`, and every other subcommand takes
 `--account` (defaulting to the only one, where there is only one). Removing an account unmounts it
 and deletes its directories, and nothing else is touched.
 
@@ -871,7 +871,7 @@ Two consequences of §6.1's auth model. Each account consents **separately** aga
 client, so each one is a separate "user" against Google's 100-user lifetime cap on an unverified
 app — irrelevant at a handful, worth knowing before adding fifty. And **while the Cloud app is in
 Testing status, every account must be added as a test user** or its consent is refused outright,
-which is a confusing failure if you do not know to expect it; `aqueduct account add` names it when
+which is a confusing failure if you do not know to expect it; `oursync account add` names it when
 consent fails that way.
 
 The Nemo extension and the tray aggregate across accounts, each reporting per-account state, since
@@ -912,7 +912,7 @@ answer, because "fails silently" is the only unacceptable behaviour in a filesys
 | Failure | Behaviour |
 |---|---|
 | Network down | Cached content readable; uncached reads return `EHOSTUNREACH` quickly rather than hanging; writes accepted into the cache and queued; tray shows offline. |
-| Refresh token expired | Mount stays up, read-only from cache, notification naming `aqueduct auth`. Never an empty tree. |
+| Refresh token expired | Mount stays up, read-only from cache, notification naming `oursync auth`. Never an empty tree. |
 | Daemon killed | `auto_unmount` tears the mount down, so a stale mount cannot serve wrong data. Queue and cache survive in SQLite. |
 | `downloadQuotaExceeded` on a file | That read fails with `EIO` and a notification naming the file; everything else carries on. |
 | Drive storage full | Uploads stop, queue retained, notification. Local writes keep succeeding into the cache — with the tray showing the backlog, since pretending otherwise would be worse. |
@@ -933,7 +933,7 @@ answer, because "fails silently" is the only unacceptable behaviour in a filesys
 - The mount needs no capability at all. Passthrough wants `CAP_SYS_ADMIN` and is skipped without
   it. Mirror mode's `fanotify` mark wants `CAP_SYS_ADMIN` and falls back to `inotify` without it.
   **Nothing in the default configuration is privileged.**
-- Logs name paths. They are 0600 under `~/.local/state/aqueduct/`, and `--log-redact` hashes
+- Logs name paths. They are 0600 under `~/.local/state/oursync/`, and `--log-redact` hashes
   names for when a log is to be shared.
 
 ---
@@ -981,7 +981,7 @@ Numbered so they can be cited and reversed on purpose rather than by drift.
 
 ### Awaiting Jonny
 
-- **A1. Repository name.** `aqueduct` — it carries content on demand over a distance, and it sits
+- **A1. Repository name.** `oursync` — it carries content on demand over a distance, and it sits
   beside `trebuchet` without pretending to be a Google product. Say the word and it is renamed.
 - **A2. Publishing `an existing Cloud project` to "In production"** to escape the seven-day refresh-token
   cap. His consent screen and his Google account, so his call. It would also end the weekly

@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in this repository. The workspace-level
 `~/Documents/git/CLAUDE.md` and the `reckless-working-practice` skill still apply; this covers what
-is specific to Aqueduct.
+is specific to OurSync.
 
 ## What this is
 
@@ -120,7 +120,7 @@ without reading §2 and §9 of the design is not.
 ## Working on it
 
 ```sh
-make build          # -> ./aqueductd and ./aqueduct
+make build          # -> ./oursyncd and ./oursync
 make check          # the full gate: tests plus vet plus gofmt
 make cover          # statement coverage, gated
 ```
@@ -130,7 +130,7 @@ here. Build trees go under `build/`, as everywhere in this workspace.
 
 **Checking a Linux build from Windows needs `CGO_ENABLED=0`.** This PC has `go env CC` set to
 MSYS2's clang (pawnstar-go's race detector needs it), so a bare `GOOS=linux go build` tries to
-compile `runtime/cgo` with a Windows clang and dies on `grp.h`. Aqueduct uses no cgo at all — that
+compile `runtime/cgo` with a Windows clang and dies on `grp.h`. OurSync uses no cgo at all — that
 is the point of go-fuse and the pure-Go SQLite driver — so the right invocation is
 `CGO_ENABLED=0 GOOS=linux go build ./...`, which `make crosscheck` runs.
 

@@ -1,9 +1,9 @@
 [Nemo Action]
 Name=Remove local copy
 Comment=Free the disk space used by %N; it stays in Drive and will stream when opened
-Exec=@BIN@/aqueduct-nemo unpin %F
+Exec=@BIN@/oursync-nemo unpin %F
 Icon-Name=edit-delete
 Selection=notnone
 Extensions=any;
 # Only offer this for something that really is kept offline, so the menu never shows both entries.
-Conditions=exec @BIN@/aqueduct-nemo can-unpin %F;
+Conditions=exec @BIN@/oursync-nemo can-unpin %F;

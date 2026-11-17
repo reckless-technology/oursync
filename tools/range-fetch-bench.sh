@@ -2,14 +2,14 @@
 # Fetch a Drive file with N concurrent HTTP range requests and report the throughput, alongside a
 # non-Google control download taken in the same conditions.
 #
-# This is the measurement the project turns on, stated as plainly as it can be: Aqueduct's read path
+# This is the measurement the project turns on, stated as plainly as it can be: OurSync's read path
 # (docs/design.md §6.6) is a parallel fetch pool, justified by the claim that one stream does not
 # fill a fast link. rclone's mount reads a file as a single chunked sequential stream. So if N
 # concurrent ranges are no faster than one, the read path has nothing to win.
 #
 # Why curl rather than rclone:
 #
-#   - It is a faithful model of what Aqueduct would do - the same endpoint, the same Range headers,
+#   - It is a faithful model of what OurSync would do - the same endpoint, the same Range headers,
 #     the same number of sockets - rather than a proxy for it through another tool's VFS.
 #   - It needs nothing installed on the machine under test, which matters because the only wired
 #     gigabit machine here is a CI runner.
@@ -21,14 +21,14 @@
 # non-Google CDN. If the control moves with the samples, the link is the story and Drive is not.
 #
 # Usage:   tools/range-fetch-bench.sh <drive-file-id>
-# Env:     AQ_TOKEN_FILE   file holding a bare OAuth access token (default ~/.config/aqueduct/access_token)
+# Env:     AQ_TOKEN_FILE   file holding a bare OAuth access token (default ~/.config/oursync/access_token)
 #          WINDOW_MIB      bytes per sample, split across the streams (default 512)
 #          FIRST_OFFSET_MIB  where in the file to start (default 1024)
 #          CONCURRENCY     stream counts to try, in order (default "1 2 4 8 16 1 2 4 8 16 1 8")
 set -u
 
 FILE_ID="${1:?usage: range-fetch-bench.sh <drive-file-id>}"
-TOKEN_FILE="${AQ_TOKEN_FILE:-$HOME/.config/aqueduct/access_token}"
+TOKEN_FILE="${AQ_TOKEN_FILE:-$HOME/.config/oursync/access_token}"
 WINDOW_MIB="${WINDOW_MIB:-512}"
 FIRST_OFFSET_MIB="${FIRST_OFFSET_MIB:-1024}"
 CONCURRENCY="${CONCURRENCY:-1 2 4 8 16 1 2 4 8 16 1 8}"

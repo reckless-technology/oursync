@@ -1,10 +1,10 @@
 [Nemo Action]
 Name=Make available offline
 Comment=Keep a copy of %N on this machine, so it opens at local speed and never re-downloads
-Exec=@BIN@/aqueduct-nemo pin %F
+Exec=@BIN@/oursync-nemo pin %F
 Icon-Name=document-save
 Selection=notnone
 Extensions=any;
 # Only offer this inside the Drive mount, and only for something not already kept offline.
 # Nemo runs this and shows the item when it exits 0.
-Conditions=exec @BIN@/aqueduct-nemo can-pin %F;
+Conditions=exec @BIN@/oursync-nemo can-pin %F;

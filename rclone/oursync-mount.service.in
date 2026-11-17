@@ -1,5 +1,5 @@
 [Unit]
-Description=Aqueduct - Google Drive streamed at @MOUNT@, with pinned files on local disk
+Description=OurSync - Google Drive streamed at @MOUNT@, with pinned files on local disk
 Documentation=https://rclone.org/commands/rclone_mount/
 # The mount is useless without a route out, and rclone started before the network is up spends its
 # first minutes failing listings that the VFS then caches as empty directories.
@@ -8,9 +8,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# `aqueduct mount` runs rclone in the foreground, which is what systemd wants; it reads the mount
-# flags and the pin directory from ~/.config/aqueduct/aqueduct.conf so they stay in one place.
-ExecStart=@BIN@/aqueduct mount
+# `oursync mount` runs rclone in the foreground, which is what systemd wants; it reads the mount
+# flags and the pin directory from ~/.config/oursync/oursync.conf so they stay in one place.
+ExecStart=@BIN@/oursync mount
 ExecStop=/bin/fusermount -u @MOUNT@
 Restart=on-failure
 RestartSec=10s

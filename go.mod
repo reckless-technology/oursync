@@ -1,4 +1,4 @@
-module github.com/reckless-technology/aqueduct
+module github.com/reckless-technology/oursync
 
 go 1.26.0
 

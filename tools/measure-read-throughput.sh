@@ -2,7 +2,7 @@
 # Measure Google Drive read throughput: one sequential stream against N parallel byte ranges.
 #
 # This answers the question the whole project turns on. rclone's mount reads a file as a single
-# chunked sequential stream; Aqueduct's design (docs/design.md §6.6) assumes a parallel fetch pool
+# chunked sequential stream; OurSync's design (docs/design.md §6.6) assumes a parallel fetch pool
 # beats that on a fast downlink. If parallel ranges are no faster than one stream, the read path has
 # nothing to win and this repository should become a pinning and status layer over rclone, or be
 # abandoned. That is a measurement, and until it is run everything downstream of it is a guess.

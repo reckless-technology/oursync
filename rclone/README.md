@@ -1,4 +1,4 @@
-# Aqueduct, built on rclone
+# OurSync, built on rclone
 
 Google Drive at `~/Drive`, streamed on demand, with chosen files kept on local disk.
 
@@ -27,7 +27,7 @@ no flag that means "keep this one". That gap is what the scripts here close, and
 - `action_policy=epall` — a write to an existing file applies to **every** upstream holding it, so a
   pinned copy cannot silently diverge from the copy in Drive.
 - `:nc` on the local upstream — nothing is ever *created* there by accident. A pin is placed
-  deliberately, by `aqueduct pin`, and nothing else writes there.
+  deliberately, by `oursync pin`, and nothing else writes there.
 - **`:writeback` is deliberately not used.** It copies the whole file to local disk on first read,
   which is caching everything — and the corpus this is for is larger than the disk.
 
@@ -48,7 +48,7 @@ Then:
 
 ```sh
 ./install.sh
-systemctl --user enable --now aqueduct-mount.service
+systemctl --user enable --now oursync-mount.service
 ```
 
 Everything lands under `$HOME`. No root, no system file touched.
@@ -56,11 +56,11 @@ Everything lands under `$HOME`. No root, no system file touched.
 ## Use
 
 ```sh
-aqueduct pin  ~/Drive/Audio/session.wav     # keep it on disk
-aqueduct unpin ~/Drive/Audio/session.wav    # give the space back
-aqueduct list                               # what is pinned, and what it costs
-aqueduct status ~/Drive/some/file           # pinned or streamed
-aqueduct doctor                             # the whole configuration and its state
+oursync pin  ~/Drive/Audio/session.wav     # keep it on disk
+oursync unpin ~/Drive/Audio/session.wav    # give the space back
+oursync list                               # what is pinned, and what it costs
+oursync status ~/Drive/some/file           # pinned or streamed
+oursync doctor                             # the whole configuration and its state
 ```
 
 Or right-click in Nemo: **Make available offline** / **Remove local copy**. The two entries are

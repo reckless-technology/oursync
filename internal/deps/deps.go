@@ -1,6 +1,6 @@
 // Package deps exists only to pin the module's dependency set.
 //
-// Every dependency Aqueduct will use is listed here as a blank import, so that `go mod tidy`
+// Every dependency OurSync will use is listed here as a blank import, so that `go mod tidy`
 // keeps it in go.mod before any real code imports it. That matters because the packages are
 // written in parallel: without this, the first `tidy` would drop everything unused and each
 // package's author would re-add its own dependencies at whatever version resolved that day.

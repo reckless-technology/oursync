@@ -1,4 +1,4 @@
-# Aqueduct — build order
+# OurSync — build order
 
 The order things get built in, and what "done" means for each. Written 2026-11-16, before any
 code. [design.md](design.md) is the what and the why; this is the sequence.
@@ -11,8 +11,8 @@ scaffolding.
 
 ## M0 — the repository, and proof that auth works
 
-Exit: `aqueduct auth` completes a loopback consent in Chrome, stores the token in the keyring, and
-`aqueduct status` prints the account's name and storage quota from `about.get`.
+Exit: `oursync auth` completes a loopback consent in Chrome, stores the token in the keyring, and
+`oursync status` prints the account's name and storage quota from `about.get`.
 
 - Go module, `Makefile` (the house wrapper: `build`, `test`, `check`, `cover`, `vet`, `fmt`),
   `.githooks`, `tools/setup-dev.sh`, CI on GitHub-hosted Linux (the repo is private, so see the
@@ -23,8 +23,8 @@ Exit: `aqueduct auth` completes a loopback consent in Chrome, stores the token i
 - `internal/auth`: loopback listener, PKCE, `access_type=offline` + `prompt=consent`, Secret
   Service storage over D-Bus with the 0600-file fallback, keyed per account.
 - `internal/drive`: the retrying, quota-budgeted transport, and `about.get`.
-- `aqueduct auth --show-expiry` prints `refresh_token_expires_in`.
-- `aqueduct account add|list|remove`, and a measurement of the real uplink and downlink
+- `oursync auth --show-expiry` prints `refresh_token_expires_in`.
+- `oursync account add|list|remove`, and a measurement of the real uplink and downlink
   (§11.2b) recorded in the repository, since the upload cap and every time estimate derive from it.
 
 **Why this is first.** It settles §11.1 — the seven-day token question — on day one, for the cost
@@ -32,9 +32,9 @@ of one command, and it proves the whole credential chain before anything depends
 
 ## M1 — metadata, and the names problem solved on real data
 
-Exit: `aqueduct tree` prints Jonny's actual Drive — all ~5 TB of metadata, which is plausibly
+Exit: `oursync tree` prints Jonny's actual Drive — all ~5 TB of metadata, which is plausibly
 10⁵–10⁶ rows — with every duplicate name, slash-bearing name and shortcut resolved; the ingest
-resumes correctly when interrupted halfway; and `aqueduct sync` applies remote changes to the
+resumes correctly when interrupted halfway; and `oursync sync` applies remote changes to the
 database while it runs. Two accounts ingest side by side, each into its own database. No FUSE yet.
 
 - `internal/store`: schema, migrations, WAL.
@@ -83,14 +83,14 @@ flight leaves the downlink usable.
 - Resumable upload queue with the session URI and committed offset persisted per chunk.
 - Pre-generated ids for creates; one `files.update` for rename-and-move; `trashed` for unlink with
   `EPERM` and an explanation for a non-owner.
-- The conflict rule, and `aqueduct conflicts`.
+- The conflict rule, and `oursync conflicts`.
 - `fsync` that does not block on the network.
 
 ## M4 — offline files and selective sync
 
 Exit: "available offline" on a folder hydrates it and keeps it hydrated across a reboot;
 an excluded folder is absent from the mount and costs nothing; pin state survives a daemon
-restart and is visible in `aqueduct status`.
+restart and is visible in `oursync status`.
 
 ## M5 — the desktop
 
@@ -104,13 +104,13 @@ raise a notification.
 
 ## M6 — shipping
 
-Exit: `apt install ./aqueduct_*.deb` on a clean Mint 22.3 install gets a working mount after one
-`aqueduct auth`, the service survives a reboot, and `aqueduct doctor` is clean.
+Exit: `apt install ./oursync_*.deb` on a clean Mint 22.3 install gets a working mount after one
+`oursync auth`, the service survives a reboot, and `oursync doctor` is clean.
 
 - `.deb` via debhelper for noble; `systemd --user` unit wanted by `graphical-session.target`.
 - First-run wizard: the Cloud-project walkthrough of §6.1, opening the right console pages in
   order, since no API can mint an OAuth client.
-- `aqueduct doctor`.
+- `oursync doctor`.
 - README with the honest limitations of §10.
 
 ---
@@ -137,7 +137,7 @@ Exit: `apt install ./aqueduct_*.deb` on a clean Mint 22.3 install gets a working
 
 | Risk | If it bites | Mitigation already in the design |
 |---|---|---|
-| Seven-day token cap survives publishing | A weekly `aqueduct auth` | Read-only-from-cache degradation and a notification, not a broken mount (§6.1) |
+| Seven-day token cap survives publishing | A weekly `oursync auth` | Read-only-from-cache degradation and a notification, not a broken mount (§6.1) |
 | `alt=media` ignores `Range` for some file class | Whole-file fetches for those files | The 200 response is handled, not assumed away (§6.2) |
 | Change-feed latency is minutes, not seconds | Remote edits appear late | Never wait on the feed for our own writes; poll interval tunable (§6.5) |
 | A write pattern that rewrites large files repeatedly | Hours of uplink per edit — the uplink binds long before Drive's 750 GB/day cap does | Hash-and-skip, coalescing, rate limiting, and the cost declared before it is spent (§3.3, §6.7). Not solvable: no public API sends a delta |

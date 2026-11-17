@@ -1,5 +1,5 @@
 #!/bin/bash
-# Aqueduct - stream Google Drive, and keep chosen files on local disk.
+# OurSync - stream Google Drive, and keep chosen files on local disk.
 #
 # Drive appears at ~/Drive. Nothing is downloaded until something reads it, and what is read is
 # cached and evicted as the cache fills. A file that must be fast is *pinned*: a real copy is placed
@@ -21,19 +21,19 @@
 # first read, which is caching everything - and the corpus this is for is larger than the disk.
 set -u
 
-CONF="${AQUEDUCT_CONF:-$HOME/.config/aqueduct/aqueduct.conf}"
+CONF="${OURSYNC_CONF:-$HOME/.config/oursync/oursync.conf}"
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
 
 REMOTE="${REMOTE:-gdrive-own}"
 UNION="${UNION:-drive-pinned}"
 MOUNT="${MOUNT:-$HOME/Drive}"
-PIN_DIR="${PIN_DIR:-$HOME/.local/share/aqueduct/pinned}"
-CACHE_DIR="${CACHE_DIR:-$HOME/.cache/aqueduct}"
+PIN_DIR="${PIN_DIR:-$HOME/.local/share/oursync/pinned}"
+CACHE_DIR="${CACHE_DIR:-$HOME/.cache/oursync}"
 CACHE_MAX_SIZE="${CACHE_MAX_SIZE:-20G}"
 CACHE_MAX_AGE="${CACHE_MAX_AGE:-72h}"
 RC_ADDR="${RC_ADDR:-127.0.0.1:5572}"
-RC_USER="${RC_USER:-aqueduct}"
+RC_USER="${RC_USER:-oursync}"
 RC_PASS="${RC_PASS:-}"
 
 PROG=${0##*/}
