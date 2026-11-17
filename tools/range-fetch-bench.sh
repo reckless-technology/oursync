@@ -62,6 +62,23 @@ fi
 rate() { awk -v b="$1" -v s="$2" 'BEGIN { if (s <= 0) print "n/a"; else printf "%.1f", b / s / 1048576 }'; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.2f", b - a }'; }
 
+# The control must prove it transferred what it asked for. speed.cloudflare.com answers 403 with a
+# one-byte body when it is unhappy - above its size cap, or under repeated requests - and dividing
+# that by a near-zero time reads as hundreds of MB/s on a link that cannot carry it. A transfer that
+# did not happen must never read as infinite speed, so a short body is reported as "failed", not as
+# a number.
+control() {
+    local start end got
+    start=$(date +%s.%N)
+    got=$(curl -s -o /dev/null -w '%{size_download}' --max-time 120 "$CONTROL_URL")
+    end=$(date +%s.%N)
+    if [ "${got:-0}" -lt "$CONTROL_BYTES" ]; then
+        echo "failed"
+    else
+        rate "$CONTROL_BYTES" "$(elapsed "$start" "$end")"
+    fi
+}
+
 echo "== Drive range-fetch throughput"
 echo "host:     $(hostname) - $(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME") - kernel $(uname -r)"
 echo "date:     $(date -Is)"
@@ -94,15 +111,12 @@ for N in $CONCURRENCY; do
     wait
     END=$(date +%s.%N)
 
-    CSTART=$(date +%s.%N)
-    curl -s -o /dev/null --max-time 120 "$CONTROL_URL"
-    CEND=$(date +%s.%N)
+    CONTROL_RATE=$(control)
 
     SECS=$(elapsed "$START" "$END")
-    CSECS=$(elapsed "$CSTART" "$CEND")
     printf '%-7s %-8s %12s %9s %10s %12s\n' \
         "$((i + 1))" "$N" "$((OFFSET / 1048576))" \
-        "$SECS" "$(rate "$WINDOW" "$SECS")" "$(rate "$CONTROL_BYTES" "$CSECS")"
+        "$SECS" "$(rate "$WINDOW" "$SECS")" "$CONTROL_RATE"
 
     i=$((i + 1))
 done

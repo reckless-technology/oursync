@@ -39,19 +39,30 @@ What that question turned up:
   chunked sequential readahead on a gigabit link**. rclone's `--multi-thread-streams` applies to
   `copy`, not to mount reads, so there is a real possibility here, and it is unmeasured.
 
-**The measurement that unblocks this**, and nothing more should be built before it: install rclone
-on `jonny-precision` (done — v1.76.0 at `/usr/local/bin/rclone`), authorise a **read-only** Drive
-remote, then compare, on the same large file over the same link: rclone mount read throughput, the
-link's ceiling via a multi-threaded copy, and a parallel-range prototype against the Drive API.
-`tools/evaluate-gvfs-google.sh` measures any mount point the same way and is staged there.
+**The measurement has now been run, and it went against the design.** See
+[docs/measurements.md](docs/measurements.md) for every figure with its machine and date.
 
-It stopped at the authorisation: `rclone authorize` needs one browser consent, Jonny was away from
-his desk, Chrome's Claude extension is installed on the Legion but its side panel is not signed in,
-and computer-use cannot click into a browser (browsers are read-tier). Nothing was authorised — no
-`rclone.conf`, no token, no Cloud project touched.
+On `jonny-precision` over Wi-Fi and on `reckless-ci-lin-0` over wired gigabit, against Jonny's own
+Drive with his own OAuth client:
 
-**If the throughput measurement favours rclone, this repository should become a thin pinning and
-status layer, or be abandoned.** Say so plainly rather than building the design as written.
+- A **single** range request runs at 65.5 MB/s (precision) and 73.3 MB/s mean, 83.3 best (lin-0).
+- **Parallel** range requests add at most about 10 MB/s, which is **smaller than the spread between
+  repeats of the single-stream configuration** (17.9 MB/s on both machines).
+- `rclone mount` delivers 62.3 MB/s at its defaults and up to 77.6 tuned, in the same band as raw
+  range requests. Its VFS is not leaving throughput on the table.
+
+So §6.6's premise — that one stream will not fill a fast downlink — **is not supported**, and the
+read path that the whole daemon exists to provide wins nothing. Do not rebuild it on the belief that
+parallelism is free money here; it was measured and it is not.
+
+**This repository should therefore become a thin pinning and status layer over rclone, or be
+abandoned.** That is Jonny's call, not an agent's, and it has not yet been made.
+
+**What the measurements do not cover, and what could still justify the project**: small-file and
+metadata latency over a 5 TB corpus — listings, `stat` storms, opening a file from an application.
+That is where a local database fed by Drive's change feed could plausibly beat rclone, and it is
+entirely unmeasured. Throughput on one large file says nothing about it. Measure that before either
+reviving the design or closing it.
 
 [docs/plan.md](docs/plan.md) has the build order for if it does go ahead; start at M0, and do not
 skip ahead — M0 and M1 exist to settle the refresh-token cap and the name mapping against real data

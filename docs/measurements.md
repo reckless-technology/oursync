@@ -94,15 +94,79 @@ spread. On this machine, at this link speed, **parallelism has no demonstrated e
 One stream also repeatedly ran *faster* than the Cloudflare control beside it (71.8 against 64.1).
 A single Drive connection is therefore not the binding constraint here; the link is.
 
-### reckless-ci-lin-0, wired gigabit
+### reckless-ci-lin-0, wired gigabit, 2026-11-17
 
-Pending - see below.
+Run on the wired machine because Wi-Fi could not answer the question: precision's link is at about
+the same rate as a single Drive stream, so a per-connection cap would be invisible there. Jonny
+reports about 900 Mbit on ethernet, where a cap at 70 MB/s would leave nearly half the link unused.
 
-## What is not yet measured
+1 GiB per sample. Two runs: the first was cut short at four samples when the ssh carrying it dropped
+under load, so the second was launched detached with `setsid`. Both are kept; they are independent
+repeats of the same configurations.
 
-- rclone mount throughput, which is the incumbent's real number. The range benchmark says what the
-  API and the link can do; the mount says how much of that survives rclone's VFS, and only the gap
-  between them is available for Aqueduct's read path to win.
-- Whether ~70 MB/s is a per-connection cap. Wi-Fi cannot answer it: the link is at roughly the same
-  rate, so a cap would be invisible. Jonny reports about 900 Mbit on ethernet, where a per-connection
-  cap at 70 MB/s would leave nearly half the link unused and parallelism would pay.
+| streams | samples (MB/s) | mean | spread |
+|---|---|---|---|
+| 1 | 67.1, 68.8, 83.3, 65.4, 81.9 | 73.3 | 17.9 |
+| 4 | 90.9, 64.5, 87.1 | 80.8 | 26.4 |
+| 8 | 78.1 | 78.1 | - |
+| 16 | 76.4, 84.7, 88.7 | 83.3 | 12.3 |
+
+**A single connection reached 83.3 MB/s, 666 Mbit** - faster than several of the parallel samples.
+There is no per-connection cap anywhere near 70 MB/s. Sixteen streams beat one by 10.0 MB/s on
+means, against a single-stream spread of 17.9: the advantage does not clear the noise.
+
+The Cloudflare control read 68-77 MB/s while Drive samples reached 90.9, so the control understates
+this link - 50 MiB is too short a transfer to measure it, and that endpoint will not serve more.
+The best observed figure puts the link at 727 Mbit or better, consistent with Jonny's 900.
+
+## rclone mount, the incumbent's real number
+
+`tools/measure-mount-throughput.sh`, `jonny-precision`, 2026-11-17, 1 GiB read from a cold cache for
+each configuration.
+
+| configuration | MB/s |
+|---|---|
+| `--vfs-cache-mode full` (defaults) | 62.3 |
+| `--vfs-cache-mode off` | 64.4 |
+| full, `--vfs-read-chunk-size 64M --vfs-read-chunk-size-limit off` | 69.2 |
+| full, `--vfs-read-ahead 512M` | 77.6 |
+| full, `--transfers 8 --vfs-read-chunk-size 64M` | 72.4 |
+| **full (defaults), repeated** | **42.5** |
+
+The first configuration repeated at the end gives 62.3 against 42.5, so **the noise floor of this
+run is 19.8 MB/s** and every difference between the other rows is smaller than it. No tuning flag is
+demonstrated to do anything.
+
+The control column of this run is void. It was not guarded, Cloudflare began answering 403 with
+one-byte bodies under repeated requests, and the script reported 357, 263, 250 and 416 MB/s on a
+511 Mbit link. The same defect had already been found an hour earlier and was not carried into this
+script. Both scripts now require the control to return the bytes it asked for and print "failed"
+otherwise. The mount throughputs themselves are unaffected - `dd` moved a real GiB each time.
+
+## The verdict
+
+| path | precision, Wi-Fi | lin-0, wired |
+|---|---|---|
+| one range request | 65.5 mean | 73.3 mean, 83.3 best |
+| parallel range requests | 60.2-74.7 by stream count | 78.1-83.3 by stream count |
+| rclone mount | 42.5-77.6, 62.3 at defaults | not measured (no rclone there) |
+
+**The design's premise is not supported.** `docs/design.md` §6.6 asserts that one stream will not
+fill a fast downlink. On both machines a single Drive connection runs at or near whatever the link
+will carry, parallel ranges add at most about 10 MB/s, and that gain is smaller than the variation
+between repeats of the same configuration. rclone's mount lands in the same band as raw range
+requests, so its VFS is not leaving throughput on the table either.
+
+There is no gap here for Aqueduct's read path to win. What survives is the narrower list already in
+`CLAUDE.md`: pinning, per-file status in Nemo, and cross-account bandwidth scheduling. None of those
+is a reason to write a filesystem.
+
+What this does **not** settle, stated so nobody mistakes the scope:
+
+- Small-file and metadata latency, which is where a 5 TB corpus is actually painful - directory
+  listings, `stat` storms, opening a file in an application. Throughput on one large file says
+  nothing about it, and it is the one dimension where a local database over Drive's change feed
+  could plausibly beat rclone.
+- Write behaviour. Measured not at all.
+- Whether the gain that does not clear the noise here is real. Settling a 10 MB/s difference against
+  a 17.9 MB/s spread would need many more repeats than were run.

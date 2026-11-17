@@ -40,6 +40,22 @@ trap unmount EXIT INT TERM
 
 rate() { awk -v b="$1" -v s="$2" 'BEGIN { if (s <= 0) print "n/a"; else printf "%.1f", b / s / 1048576 }'; }
 
+# The control must prove it transferred what it asked for. speed.cloudflare.com answers 403 with a
+# one-byte body when it is unhappy - above its size cap, or under repeated requests - and dividing
+# that by a near-zero time reads as hundreds of MB/s on a link that cannot carry it. This ran
+# unguarded once, on 2026-11-17, and reported 416 MB/s on a 511 Mbit link.
+control() {
+    local start end got
+    start=$(date +%s.%N)
+    got=$(curl -s -o /dev/null -w '%{size_download}' --max-time 120 "$CONTROL_URL")
+    end=$(date +%s.%N)
+    if [ "${got:-0}" -lt "$CONTROL_BYTES" ]; then
+        echo "failed"
+    else
+        rate "$CONTROL_BYTES" "$(awk -v a="$start" -v b="$end" 'BEGIN { printf "%.2f", b - a }')"
+    fi
+}
+
 echo "== rclone mount read throughput"
 echo "host:    $(hostname) - kernel $(uname -r)"
 echo "date:    $(date -Is)"
@@ -71,16 +87,13 @@ run_config() {
     dd if="$MNT/$RPATH" of=/dev/null bs=1M count="$READ_MIB" skip="$SKIP_MIB" 2>/dev/null
     END=$(date +%s.%N)
 
-    CSTART=$(date +%s.%N)
-    curl -s -o /dev/null --max-time 120 "$CONTROL_URL"
-    CEND=$(date +%s.%N)
+    CONTROL_RATE=$(control)
 
     SECS=$(awk -v a="$START" -v b="$END" 'BEGIN { printf "%.2f", b - a }')
-    CSECS=$(awk -v a="$CSTART" -v b="$CEND" 'BEGIN { printf "%.2f", b - a }')
     printf '%-42s %9s %10s %12s\n' \
         "$LABEL" "$SECS" \
         "$(rate $((READ_MIB * 1048576)) "$SECS")" \
-        "$(rate "$CONTROL_BYTES" "$CSECS")"
+        "$CONTROL_RATE"
 
     unmount
 }
