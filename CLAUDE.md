@@ -39,6 +39,17 @@ without reading §2 and §9 of the design is not.
 - **One stored `local_name` per node**, computed once at ingest, protected by
   `UNIQUE(parent_id, local_name)`. Never re-derive a POSIX name from a Drive name at use time.
 - **No client ID ships in this repository.** Ever. See the README.
+- **There is no delta upload, and no amount of cleverness finds one.** Verified 2026-11-16 against
+  `files.update`, the resumable protocol, the revisions resource and the whole v3 method list: no
+  write-at-offset, no append, no patch, no block or signature endpoint, no revision-from-diff.
+  Google's *own* client has done differential uploads since October 2024 through something
+  undocumented, which is why this keeps looking possible. If you think you have found a way, you
+  have found an endpoint nobody has documented — check it twice before building on it.
+- **The read path is parallel by design.** One stream will not fill a gigabit link. Do not
+  simplify the fetch pool into a single sequential reader; the premise is measured in M2.
+- **Accounts are isolated; the link and the disk are not.** Per-account tokens, databases, caches
+  and quota budgets; one global fetch pool, upload queue and cache budget. Making the pools
+  per-account would let two accounts each saturate a 50 Mbit uplink.
 
 ## Working on it
 

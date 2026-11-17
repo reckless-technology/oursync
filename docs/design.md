@@ -24,6 +24,33 @@ security-assessment regime (§3.1).
 kernel **7.0.0-42-generic**, 12 threads, 30 GB RAM, 267 GB free on an ext4 root (checked
 2026-11-16). Written to run on stock Mint 22.x as well, whose own ISO ships 6.14.
 
+### 1.1 The usage profile this is built for
+
+Stated by Jonny on 2026-11-16, and it is not a generic cloud-sync workload. Every number here is
+load-bearing somewhere below.
+
+| | |
+|---|---|
+| Data in Drive | **~5 TB** — roughly 19× the free space on the target machine |
+| Link | **~1 Gbit down, ~50 Mbit up.** Asymmetric by a factor of 20 |
+| Dominant use | **Streaming reads.** The great majority of access is read-only viewing |
+| Writes | Occasional, and sometimes to large files |
+| Accounts | **More than one**, each wanting its own mount point |
+
+Four consequences follow, and they are the spine of the rest of this document:
+
+1. **The cache can never hold the corpus.** 5 TB against 267 GB means the design is a streaming
+   one by necessity, not by preference, and that eviction policy and "available offline" sizing are
+   first-class concerns rather than tidying (§6.6, §6.9).
+2. **The read path is the hot path and must fill a gigabit link.** A single HTTPS stream will not;
+   this is where the engineering effort goes (§6.6).
+3. **Upload bytes are the scarce resource.** 50 Mbit is ~6.25 MB/s, so ~22 GB/hour at theoretical
+   line rate. Every byte we do not have to send is worth more than every byte we fetch quickly, and
+   §3.3 is where the bad news lives.
+4. **The metadata set is large.** 5 TB is plausibly 10⁵–10⁶ files, which changes the ingest,
+   the memory model and the inode strategy from "walk the tree" to something that paginates,
+   resumes and does not hold the tree in RAM (§6.3, §6.5).
+
 **Language.** Go 1.26.x, Jonny's choice on 2026-11-16 over Rust and C++20. The reasoning is in
 §2.3 and it held up: the two libraries the project leans on both turned out to do more than
 expected.
@@ -178,17 +205,55 @@ units/minute. The budget is not the constraint; politeness and responsiveness ar
 The download cost is the interesting one: at 200 units a request, small readahead chunks are
 expensive, which argues for large ranges (§6.6).
 
-### 3.3 Writes are whole-object
+### 3.3 Writes are whole-object, and this is the design's one real defeat
 
-There is no append and no write-at-offset in the Drive API. Any modification to an existing file
-means re-uploading that file. Consequences, all load-bearing:
+**A client using the public Drive API cannot send only the changed bytes of a file.** This was
+verified rather than assumed, on 2026-11-16, because Jonny asked for it specifically and because it
+is the difference between a four-byte edit costing four bytes and costing the whole file:
 
-- the write path is **write to the local cache file, upload on close** (§6.7);
-- a program that rewrites 4 bytes of a 2 GB file costs a 2 GB upload, and the user has to be told
-  rather than surprised;
-- uploads are capped at **750 GB per user per day**, shared with copies;
-- a resumable session URI lives **one week**, so an interrupted upload can be resumed across a
-  restart if the session is persisted — and it is (§6.7).
+- `files.update` has no byte-range, offset, patch, append or partial-content parameter. Its "patch
+  semantics" are about metadata fields, not content.
+- The resumable protocol's `Content-Range` describes progress through *this upload*, not a region of
+  the stored file. A session can be opened against an existing file, but only to replace it.
+- The revisions resource has no `create` at all — a revision cannot be made from a diff, a patch or
+  a base revision plus changes. `revisions.update` is metadata-only.
+- There is no delta, signature, block or chunk-level endpoint anywhere in v3, and the three
+  checksum fields are read-only whole-file metadata, never used for block negotiation.
+- v3 never states outright that uploading media replaces the entire content. **v2 does**, in
+  `newRevision`: "the blob data in the current head revision is replaced". That is the clearest
+  statement available, and it is about the same storage.
+
+**And yet Google's own client does it.** Drive for desktop 99.0 (21 October 2024) and a Workspace
+Updates post of 10 January 2025 both announce that "when large files are edited, Drive for desktop
+will now upload only the parts of the file that changed", rolled out to personal accounts as well as
+Workspace. Google documents the *feature* and nowhere documents the *mechanism*: no size threshold,
+no block size, no protocol, no public endpoint. The one attempt at packet analysis found on the
+rclone forum (December 2024) concluded it is "probably undocumented APIs", drew no replies and was
+auto-closed.
+
+So the honest statement, and it goes in the README rather than being buried here: **Google can do
+this and we cannot.** Not because of a design choice, and not something more effort fixes — there
+is no public interface to the capability. Anyone claiming otherwise should be asked for the endpoint.
+
+**What this costs Jonny, in minutes.** At ~50 Mbit up (≈6.25 MB/s at line rate, so call it 5.5 MB/s
+sustained) a full re-upload runs at about **20 GB/hour**:
+
+| Edited file | Bytes we must send | Time |
+|---|---|---|
+| 50 MB | 50 MB | ~10 s |
+| 500 MB | 500 MB | ~90 s |
+| 2 GB | 2 GB | ~6 min |
+| 5 GB | 5 GB | ~15 min |
+| 50 GB | 50 GB | ~2.5 hours |
+
+Note which limit binds: Drive's cap is 750 GB/day, and a 50 Mbit link cannot physically exceed
+~540 GB/day. **Google's upload quota is irrelevant to this machine; the uplink is the constraint**,
+and so the design's job is not to stay inside a quota but to spend as few bytes as possible and to
+stay out of the way while it spends them (§6.7).
+
+The other consequences stand: the write path is write-to-cache-and-upload-on-close, an
+`open(O_RDWR)` on a large file must hydrate it fully first, and a resumable session URI lives one
+week so an interrupted upload resumes rather than restarts.
 
 ### 3.4 Names are not identity
 
@@ -257,6 +322,12 @@ none of them talks to Google.
 to agree, and splitting them across processes buys nothing but a consistency problem. Go's
 goroutines make the concurrency internal rather than architectural.
 
+**With several accounts** (§6.15) the boxes above the metadata store multiply — one store, one
+poller set, one mount and one quota budget per account — while the two boxes at the bottom right do
+not: the fetch pool, the upload queue and the cache budget are **one set, shared**, because they
+schedule a link and a disk rather than an API allowance. One process is what makes that sharing
+possible at all.
+
 ---
 
 ## 5. Layout
@@ -265,8 +336,10 @@ goroutines make the concurrency internal rather than architectural.
 aqueduct/
   cmd/aqueductd/        the daemon
   cmd/aqueduct/         the CLI
+  internal/account/     an account's identity, label, paths and lifecycle; the registry of them
   internal/auth/        OAuth loopback, token storage in the keyring
   internal/drive/       typed client wrapper, retrying transport, range reads, exports
+  internal/sched/       the global fetch pool and the rate-limited upload queue (§6.15)
   internal/store/       SQLite schema, migrations, queries
   internal/names/       Drive name  <->  POSIX name mapping (§6.4)
   internal/sync/        change poller, local scanner, reconciler, upload queue
@@ -372,7 +445,11 @@ assumed away (the docs promise the header is honoured but never promise a 206).
 ### 6.3 Metadata store
 
 SQLite (`modernc.org/sqlite`, pure Go — no cgo, so cross-compilation and the `.deb` stay simple),
-WAL mode, at `~/.local/share/aqueduct/metadata.db`.
+WAL mode, **one database per account** at
+`~/.local/share/aqueduct/accounts/<account>/metadata.db` (§6.15). Per-account rather than one shared
+database with an account column: change tokens, ingest state and ids then never have to be
+qualified, a query cannot accidentally span accounts, and removing an account is deleting a
+directory.
 
 ```sql
 nodes(
@@ -402,6 +479,16 @@ mirrors(local_path TEXT PRIMARY KEY, drive_id TEXT, folder_id TEXT, last_scan IN
 
 Inode numbers are allocated by us and stored, never derived from the Drive id — a hash would
 collide eventually and a collision in an inode number is a data-corruption bug, not a glitch.
+
+**The tree is not held in memory.** At a million nodes, a resident node object graph would be
+hundreds of megabytes of long-lived heap for a daemon that is supposed to sit in the background, and
+it would have to be kept coherent with the change feed as well as with SQLite. Instead **SQLite is
+the tree**: go-fuse's live inodes are a working set, populated on `lookup` from indexed queries
+(`UNIQUE(parent_id, local_name)` makes a lookup a single index hit, and `parent_id` is indexed for
+`readdir`), and released on the kernel's `FORGET`. Memory then tracks what is actually open and
+recently traversed, not what exists. `readdir` streams a page of children per call rather than
+materialising a 500,000-entry folder — Drive permits that many in one folder, and a user with 5 TB
+may well have one.
 
 ### 6.4 The name mapping — one place, decided at ingest
 
@@ -445,8 +532,20 @@ detected at ingest and the symlink is left dangling rather than followed.
 
 ### 6.5 Change detection, remote
 
-One poller per change token: My Drive, plus each shared drive (their change ids are per-drive, so
-they need separate tokens). `changes.getStartPageToken` once, then `changes.list` with
+**The first ingest, at 10⁵–10⁶ files.** Before any polling there is a full enumeration, and at this
+scale it is a job rather than a loop. `files.list` at `pageSize=1000` with an explicit `fields`
+selection, written in batched transactions of one page each; the page token is persisted with each
+batch, so an interrupted ingest **resumes at the page it reached** instead of starting again. The
+change token is taken *before* the enumeration begins and applied *after* it completes, so anything
+that changed during a long ingest is picked up by the first poll rather than missed.
+
+Cost, for calibration: a million files is a thousand pages at 100 units each — 100,000 units, a
+third of one minute's budget, so quota is not the limit. Wall-clock and Drive's own paging latency
+are, and the ingest therefore reports progress (`aqueduct status` and the tray) and never blocks the
+mount: the mount can come up and serve what has been ingested while the rest arrives.
+
+Then, one poller per change token: My Drive, plus each shared drive (their change ids are per-drive,
+so they need separate tokens). `changes.getStartPageToken` once, then `changes.list` with
 `includeRemoved`, `includeItemsFromAllDrives` and `supportsAllDrives`.
 
 Three rules that matter:
@@ -473,12 +572,42 @@ read(ino, offset, size)
   └─ otherwise → fetch, serve, record
 ```
 
-**Chunking.** Fetch in 16 MiB chunks aligned to chunk boundaries, with the chunk containing the
-request fetched first. Rationale: a download costs 200 quota units whatever its size, so a small
-chunk is proportionally expensive; 16 MiB is also the Go client's own default upload chunk, which
-keeps one constant rather than two. Sequential detection (two consecutive chunks) escalates to a
-background readahead of the next two chunks; random access stays at one chunk. A file under
-16 MiB is fetched whole.
+**Chunking.** Fetch in 16 MiB chunks aligned to chunk boundaries. A file under 16 MiB is fetched
+whole. The chunk size is chosen by two constraints at once, which happen to agree:
+
+- a download costs **200 quota units whatever its size**, so small chunks are disproportionately
+  expensive. At a gigabit (≈125 MB/s) 16 MiB chunks mean ≈7.8 requests/s — about 94,000 units a
+  minute against the 325,000 budget, comfortable. The same rate in 1 MiB chunks would be 1.5
+  million units a minute, four times over budget. **Chunk size is set by the quota meter, not by
+  taste**;
+- fewer, larger requests amortise TLS and request latency, which is what a sequential read of a
+  large file is dominated by.
+
+**Parallel fetching, because one stream will not fill the link.** A single HTTPS stream does not
+reach a gigabit, so the read path is a **fetch pool**: N workers (default 8, tunable) issuing
+concurrent range requests for *distinct* chunks of the same file. Completion order does not matter,
+because each chunk is written into the sparse cache file at its own offset and the `ranges` table is
+updated per chunk. This is the single most important performance decision in the design, given §1.1.
+
+Prior, not prediction: this workspace has measured exactly this shape against another large-file
+host — roughly 1.8 MB/s per connection, scaling close to linearly with concurrent streams. That was
+a different service, so it sets the expectation that per-connection throughput is the limit and
+parallelism is the lever, and nothing more. **M2 measures Drive itself** (§11.2) and sets the
+default from the result rather than from this paragraph. Google serves HTTP/2, where many streams
+on one connection can be flow-control bound rather than bandwidth bound, so the transport is
+configured for several connections and the measurement compares the two.
+
+**First bytes before whole chunks.** A video player asking for the first 64 KiB must not wait for
+16 MiB to land. The chunk containing the request is fetched first and **streamed through to the
+kernel as it arrives**, byte ranges being satisfied from the in-flight response the moment they
+have been received, with the remainder of the chunk continuing into the cache behind the reader.
+Latency to first byte is what makes this feel like a local file; throughput is what makes it finish.
+
+**Readahead.** Two consecutive chunks mark the handle sequential, and the pool then keeps a window
+of up to N chunks ahead of the reader in flight, so a long sequential read runs with the pipe full
+rather than stalling at every chunk boundary. The window is per handle, so two files streaming at
+once share the pool fairly. Random access stays at one chunk and never earns readahead — a database
+file or a seeking player would otherwise fetch gigabytes nobody asked for.
 
 **Cache.** One sparse file per node at `~/.cache/aqueduct/content/<id-prefix>/<id>`, created with
 `ftruncate` to the full size, written at the right offsets. The `ranges` table is the authority on
@@ -490,11 +619,23 @@ we last verified, `PassthroughFd()` returns the cache file's descriptor and the 
 entirely. Otherwise it returns `false` and reads come to us. A file being written is never
 passed through (we need to see the writes), and nor is one whose fetch is incomplete.
 
-**Eviction.** LRU over `ranges`, triggered by `--cache-max-size` (default 10 % of the filesystem,
-capped at 20 GB) or `--cache-min-free` (default 2 GB). Never evicts: a node with an open handle
-(FUSE gives us the refcount), a node pinned `offline`, or a node with a pending upload. Eviction
-punches holes with `fallocate(PUNCH_HOLE|KEEP_SIZE)` and deletes the range rows in the same
-transaction.
+**Eviction, sized for a corpus 19× the disk.** This is not a cache that will ever be warm, so the
+policy has to be deliberate rather than incidental. LRU over `ranges`, triggered by
+`--cache-max-size` (default **50 GB**, or 25 % of the filesystem, whichever is smaller — on the
+target that is 50 GB against 267 GB free) or `--cache-min-free` (default 10 GB, which must win:
+filling a user's root filesystem is a worse failure than a slow read). Never evicts: a node with an
+open handle (FUSE gives us the refcount), a node pinned `offline`, or a node with a pending upload.
+
+**Eviction is by range, not by file.** Dropping whole files would mean a 40 GB video either wholly
+present or wholly absent; instead the tail of something watched once goes first while the opening of
+something watched often stays. Ranges carry a last-read timestamp, and eviction punches holes with
+`fallocate(PUNCH_HOLE|KEEP_SIZE)` and deletes the rows in one transaction.
+
+**The cache survives a restart**, which matters when refetching costs real time: on start the
+`ranges` table is reconciled against the files actually on disk (size and mtime per cache file),
+and any row whose file is missing or short is dropped. The alternative — trusting the table — would
+serve zeros out of a truncated cache file, which is precisely the failure mode §2.1 rejected
+fanotify for.
 
 ### 6.7 The write path
 
@@ -521,6 +662,46 @@ against duplicate creation, and §3.4 says Drive will happily keep both.
 `rename` and `move` are one `files.update` carrying `name`, `addParents` and `removeParents`
 together. `unlink` sets `trashed`; a non-owner cannot trash, and that returns `EPERM` with a
 notification explaining why, rather than appearing to work.
+
+**Spending as few bytes as possible.** Since §3.3 means we cannot send a delta, everything here is
+about not sending the file at all, or sending it once instead of five times. In rough order of how
+much each is worth:
+
+1. **Hash before upload, and skip if it matches.** On close, the cache file's MD5 is compared with
+   the `md5Checksum` Drive already holds. Identical content is **not uploaded**. This costs a local
+   read of a file we already have and it catches a surprising amount: an application that opens
+   `O_RDWR` and writes nothing, a save that rewrites identical bytes, a tool that rewrites a whole
+   file to change nothing, a `touch`. Against a 20 GB/hour uplink this is the single most valuable
+   line in the design.
+2. **Upload only if bytes were actually written.** The write path tracks whether any `write` dirtied
+   the file at all, so a no-op open does not even reach the hashing step. A metadata-only change —
+   rename, move, trash, mtime — never uploads content.
+3. **Debounce and coalesce.** An editor that writes, closes, writes and closes again produces one
+   upload, not two. A file re-dirtied while its upload is queued replaces the queued copy; a file
+   re-dirtied while its upload is *in flight* cancels that upload and requeues, since finishing a
+   transfer of superseded bytes is pure waste on this link.
+4. **One upload at a time, rate-limited.** Concurrency buys nothing when the uplink is the
+   bottleneck, and it makes failure handling worse. The queue runs one transfer, by default capped
+   at **80 % of the measured uplink**. The cap is not politeness: a saturated upstream queue delays
+   the ACKs for downstream traffic, so an unthrottled 5 GB upload makes a gigabit *download* link
+   feel broken for fifteen minutes. On an asymmetric connection this is the difference between a
+   daemon you forget about and one you turn off.
+5. **Say what it will cost, before it costs it.** An upload above a threshold (default 1 GB) raises
+   a notification naming the file, the bytes and the estimate — "5.2 GB, about 16 minutes" — with a
+   cancel. `aqueduct status` shows the queue, the current transfer's progress and the time
+   remaining. Given that a 50 GB edit is a two-and-a-half-hour transfer, the user finding out from
+   a progress display rather than from a slow internet connection is most of the usability of this
+   feature.
+6. **Resumable chunks of 8 MiB** rather than the client's 16 MiB default: on a thin uplink a chunk
+   is ~90 seconds of work, and that is the granularity we lose to an interruption. The 256 KiB
+   alignment rule is satisfied either way.
+
+**What is deliberately not done**, recorded so it is a decision rather than an omission: large files
+could be stored *chunked* — split into many Drive objects whose unchanged pieces are not re-sent,
+which would genuinely give delta uploads. It is rejected as a default because those files would stop
+being files in Drive: unusable from the web interface, from a phone, and from Google's own clients,
+which is most of the point of keeping them in Drive at all. It remains available as a possible
+opt-in for one nominated folder, and it is noted in §11 rather than built.
 
 **fsync** flushes to the cache file and returns. It does **not** wait for the upload: an fsync that
 blocked on a 2 GB upload would hang every editor. `aqueduct status` shows the queue, and quitting
@@ -555,6 +736,14 @@ Three states, per node, inherited by descendants unless overridden:
 
 Set from the CLI (`aqueduct pin <path>`), the Nemo context menu, or a config file. `offline` on a
 folder walks it and queues hydration at low priority, reporting progress in the tray.
+
+**Pinning is checked against the disk before it starts.** With 5 TB in Drive and 267 GB free, "make
+this folder available offline" is an instruction that can silently fill a root filesystem, and the
+metadata to prevent that is already in the database. So a pin sums the subtree's size first and
+refuses outright when it will not fit — naming the subtree's size, the free space and the shortfall
+— rather than hydrating until `ENOSPC`. Pinned bytes are **not** part of the LRU budget, because
+pinned data is not a cache; they are accounted separately, and the pin is refused if pinned plus
+cache would breach `--cache-min-free`. `aqueduct status` reports both totals.
 
 ### 6.10 Mirror mode
 
@@ -628,6 +817,45 @@ not available in the sandbox, a mount made inside the sandbox would not be visib
 Nemo, and autostart needs a portal backend. AppImage loses `setcap`, autostart and the Nemo
 integration. A `.deb`, optionally in a PPA, is the fit.
 
+### 6.15 Multiple accounts, one daemon
+
+One daemon, several Google accounts, **one FUSE mount each** — the arrangement Jonny asked for on
+2026-11-16. An account is the unit of isolation, and the split between what is per-account and what
+is global is the whole design:
+
+**Per account** — its own refresh token (a separate keyring item), its own SQLite database, its own
+cache directory, its own ingest and change pollers, its own **quota budget** (Drive meters units
+per user, so two accounts have genuinely separate 325,000/minute allowances and one must not be
+charged for the other), and its own mount point.
+
+**Global, because the machine is** — the **fetch pool** and the **upload queue**. These are
+scheduled across all accounts together, because the contended resource is one 1 Gbit/50 Mbit link
+and one disk, not an account's API allowance. Two accounts streaming at once share the eight fetch
+workers; two accounts with queued uploads still upload one file at a time. The cache budget
+(§6.6) is likewise global, with per-account directories underneath it. Getting this the wrong way
+round — per-account pools — would let two accounts each saturate the uplink and make both slow.
+
+```
+~/.local/share/aqueduct/accounts/<label>/metadata.db
+~/.cache/aqueduct/accounts/<label>/content/...
+~/Drive/<label>/                                     one mount per account
+```
+
+The label is the user's, not Google's: `aqueduct account add --label work` runs the consent flow and
+mounts at `~/Drive/work`. `aqueduct account list|remove`, and every other subcommand takes
+`--account` (defaulting to the only one, where there is only one). Removing an account unmounts it
+and deletes its directories, and nothing else is touched.
+
+Two consequences of §6.1's auth model. Each account consents **separately** against the same OAuth
+client, so each one is a separate "user" against Google's 100-user lifetime cap on an unverified
+app — irrelevant at a handful, worth knowing before adding fifty. And **while the Cloud app is in
+Testing status, every account must be added as a test user** or its consent is refused outright,
+which is a confusing failure if you do not know to expect it; `aqueduct account add` names it when
+consent fails that way.
+
+The Nemo extension and the tray aggregate across accounts, each reporting per-account state, since
+a user with two mounts wants one status icon rather than two.
+
 ---
 
 ## 7. Failure modes, and what the user sees
@@ -686,6 +914,21 @@ Numbered so they can be cited and reversed on purpose rather than by drift.
 13. **A `.deb`**, with a `systemd --user` service. Not Flatpak, not AppImage (§6.14).
 14. **Bring-your-own OAuth client**, reusing `an existing Cloud project` with a second Desktop client
     (§6.1). No client ID will ever ship in this repository.
+15. **The read path is a parallel fetch pool** of concurrent range requests, with 16 MiB chunks
+    sized by the quota meter, partial chunks streamed through to the reader, and readahead only for
+    handles that have proved sequential. The worker count is set by measurement in M2, not by this
+    document (§6.6).
+16. **Upload bytes are treated as the scarce resource**: hash-compare and skip unchanged content,
+    never upload for a metadata-only change, coalesce repeated saves, one transfer at a time capped
+    at 80 % of the uplink, and the cost shown before it is spent (§6.7). Chunked storage of large
+    files, which would give real deltas at the price of the files no longer being usable in Drive
+    itself, is rejected as a default.
+17. **Several accounts in one daemon, one mount each**, with per-account tokens, databases, caches
+    and quota budgets, but a **global** fetch pool, upload queue and cache budget — because the
+    contended resource is the link and the disk, not an account's API allowance (§6.15).
+18. **The cache is sized and evicted for a corpus far larger than the disk**: 50 GB by default,
+    range-granular LRU, `--cache-min-free` winning any argument, and pinning refused up front when
+    a subtree will not fit (§6.6, §6.9).
 
 ### Awaiting Jonny
 
@@ -701,7 +944,13 @@ Numbered so they can be cited and reversed on purpose rather than by drift.
   wording but puts a space in every path.
 - **A4. Whether mirror mode is wanted at all**, or whether streaming plus "available offline"
   covers what he actually uses it for. It is the largest single piece of work in the plan and the
-  easiest to defer.
+  easiest to defer. §3.3 sharpens this one: on a 50 Mbit uplink a mirrored folder is a standing
+  upload liability, since every local change in it is a full file upload.
+- **A5. Which accounts, and what to call their mount points.** `~/Drive/<label>` with labels of his
+  choosing. Needed before M1 can be tested against more than one.
+- **A6. Whether the chunked-storage option is wanted for one working folder** (§6.7), accepting that
+  those files stop being readable from Drive's web interface and from Google's own clients in
+  exchange for genuine delta uploads on large edits. Not needed until there is a reason.
 
 ---
 
@@ -717,6 +966,11 @@ Said plainly, so nobody spends a week trying:
 - **No kernel guarantee that a cloud file is always handled.** On Windows the filter driver
   guarantees the provider is called; on Linux a dead FUSE daemon gives `ENOTCONN` (honest) and a
   dead fanotify daemon gives zeros (not).
+- **No differential upload.** This one is not about Linux at all — it is about being a third party.
+  Google's own client uploads only the changed parts of a large file and has done since October
+  2024; no public Drive API exposes that, so an edit to a 5 GB file costs 5 GB of uplink here and a
+  few megabytes there (§3.3). It is the one place where the Windows client is not merely more
+  integrated but categorically better, and no amount of work on this codebase closes it.
 
 ---
 
@@ -740,6 +994,13 @@ to assume.
    redirect to a `googleusercontent.com` host, does the range survive the redirect, and are a
    file's bytes stable between two range requests? §6.2 handles the 200 case defensively either
    way.
+2a. **How many parallel range requests it takes to fill a gigabit, and whether separate connections
+   beat HTTP/2 streams on one.** The most consequential measurement in the project, since §1.1
+   makes read throughput the hot path: throughput against 1, 2, 4, 8, 16 workers, at 4, 16 and
+   64 MiB chunks, with the quota units spent recorded beside each. It sets the default worker count
+   and may move the chunk size. Measured in M2 on `jonny-precision`, over its own link.
+2b. **The real sustained uplink**, measured rather than assumed from "about 50 Mbit", since the
+   upload cap, the time estimates and the debounce thresholds are all derived from it.
 3. **Do `modifiedTime` and `createdTime` stick** on create and on update?
 4. **Name limits:** the maximum length Drive accepts, and its behaviour with NUL, `/`, trailing
    dots and spaces, and case-only differences. §6.4 is conservative; the tests may let it relax.

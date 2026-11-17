@@ -5,8 +5,13 @@ A streaming Google Drive filesystem for Linux Mint Cinnamon.
 Drive appears at `~/Drive` as an ordinary directory tree. Nothing is downloaded until something
 reads it; what has been read is cached locally and served at native speed afterwards. Folders can
 be marked "available offline" to be kept on disk, or excluded entirely. Remote changes arrive by
-polling Drive's change feed; local changes are uploaded on close. Nemo shows per-file status and
-the Cinnamon panel carries a status icon.
+polling Drive's change feed; local changes are uploaded on close. Several Google accounts can run
+in one daemon, each with its own mount point. Nemo shows per-file status and the Cinnamon panel
+carries a status icon.
+
+It is built for a particular shape of use: a corpus far larger than the local disk, an asymmetric
+connection, and reading much more than writing. The read path is parallel and tuned to fill a fast
+downlink; the write path is built to spend as few upload bytes as it can.
 
 **Status: design complete, no code yet.** Read [docs/design.md](docs/design.md) for the
 architecture and the evidence behind each decision, and [docs/plan.md](docs/plan.md) for the build
@@ -30,8 +35,15 @@ Said up front, because these are platform limits rather than things left undone:
   stream to serve. They appear as small stub files that open in the browser, or optionally as
   read-only exports capped at 10 MB by the API.
 - **No "Computers" backup roots.** The API offers no way to discover them.
-- **Writes are whole-file.** The Drive API has no write-at-offset, so changing four bytes of a 2 GB
-  file re-uploads 2 GB. Aqueduct will tell you it is doing that; it cannot avoid it.
+- **No differential upload — Google's own client can do this and Aqueduct cannot.** Since October
+  2024, Drive for desktop uploads only the changed parts of a large file. No public Drive API
+  exposes that: there is no write-at-offset, no append, no patch, no block or signature endpoint,
+  and a revision cannot be made from a diff. So editing four bytes of a 2 GB file re-uploads 2 GB.
+  Aqueduct does everything it can short of the impossible — it hashes before uploading and skips
+  content that has not really changed, coalesces repeated saves, never uploads for a rename or a
+  move, rate-limits the transfer so it does not strangle the rest of your connection, and tells you
+  what a transfer will cost before it spends it. It cannot send a delta, and nor can anything else
+  built on the public API.
 
 ## The one-time Google setup
 

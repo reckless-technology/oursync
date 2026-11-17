@@ -17,19 +17,25 @@ Exit: `aqueduct auth` completes a loopback consent in Chrome, stores the token i
 - Go module, `Makefile` (the house wrapper: `build`, `test`, `check`, `cover`, `vet`, `fmt`),
   `.githooks`, `tools/setup-dev.sh`, CI on GitHub-hosted Linux (the repo is private, so see the
   note on runners below).
+- `internal/account`: the account registry and its per-account paths, from the start rather than
+  retrofitted — a single-account daemon that later grows a second account tends to grow it as a
+  special case, and §6.15's whole point is which resources are shared and which are not.
 - `internal/auth`: loopback listener, PKCE, `access_type=offline` + `prompt=consent`, Secret
-  Service storage over D-Bus with the 0600-file fallback.
+  Service storage over D-Bus with the 0600-file fallback, keyed per account.
 - `internal/drive`: the retrying, quota-budgeted transport, and `about.get`.
 - `aqueduct auth --show-expiry` prints `refresh_token_expires_in`.
+- `aqueduct account add|list|remove`, and a measurement of the real uplink and downlink
+  (§11.2b) recorded in the repository, since the upload cap and every time estimate derive from it.
 
 **Why this is first.** It settles §11.1 — the seven-day token question — on day one, for the cost
 of one command, and it proves the whole credential chain before anything depends on it.
 
 ## M1 — metadata, and the names problem solved on real data
 
-Exit: `aqueduct tree` prints Jonny's actual Drive, with every duplicate name, slash-bearing name
-and shortcut resolved, and `aqueduct sync` applies remote changes to the database while it runs.
-No FUSE yet.
+Exit: `aqueduct tree` prints Jonny's actual Drive — all ~5 TB of metadata, which is plausibly
+10⁵–10⁶ rows — with every duplicate name, slash-bearing name and shortcut resolved; the ingest
+resumes correctly when interrupted halfway; and `aqueduct sync` applies remote changes to the
+database while it runs. Two accounts ingest side by side, each into its own database. No FUSE yet.
 
 - `internal/store`: schema, migrations, WAL.
 - `internal/names`: the mapping of §6.4, with a unit-test corpus of hostile names.
@@ -43,8 +49,12 @@ that shows the wrong file.
 
 ## M2 — a read-only mount that streams
 
-Exit: `~/Drive` mounts; Nemo browses it; opening a PDF, an image and a 2 GB video all work, the
-video starting promptly rather than after a full download; `du -sh` of a folder costs no downloads.
+Exit: `~/Drive/<label>` mounts; Nemo browses it; opening a PDF, an image and a 2 GB video all work,
+the video starting promptly rather than after a full download; `du -sh` of a folder costs no
+downloads; and **a sequential read of a large file sustains a usable fraction of the gigabit link**,
+with the worker-count and chunk-size sweep of §11.2a recorded in the repository and the defaults set
+from it. A read path that fills the pipe is the main thing this project is for, so it is an exit
+criterion rather than a later optimisation.
 
 - `internal/vfs`: go-fuse low-level nodes, inode lifetime and `Forget`, long attribute timeouts
   with the poller pushing `EntryNotify`/`InodeNotify`.
@@ -59,11 +69,17 @@ behaviour, redirect hosts, byte stability — run here as part of it, not later.
 
 ## M3 — writes
 
-Exit: creating, editing, renaming, moving and deleting files in `~/Drive` from Nemo, from a text
+Exit: creating, editing, renaming, moving and deleting files in the mount from Nemo, from a text
 editor and from a terminal all reach Drive; killing the daemon mid-upload and restarting resumes
-rather than restarts; a deliberate two-sided edit produces both files, correctly named.
+rather than restarts; a deliberate two-sided edit produces both files, correctly named; **a file
+opened, written with identical content and closed uploads nothing at all**; and a large upload in
+flight leaves the downlink usable.
 
 - Hydrate-before-write-open; write into the cache; queue on last release with a 1 s debounce.
+- The upload-byte economy of §6.7, which on a 50 Mbit uplink is the substance of this milestone
+  rather than a refinement: hash-and-skip unchanged content, no upload for metadata-only changes,
+  coalescing and cancel-on-supersede, one transfer at a time capped at 80 % of the measured uplink,
+  the cost declared before it is spent, and 8 MiB resumable chunks.
 - Resumable upload queue with the session URI and committed offset persisted per chunk.
 - Pre-generated ids for creates; one `files.update` for rename-and-move; `trashed` for unlink with
   `EPERM` and an explanation for a non-owner.
@@ -107,7 +123,11 @@ Exit: `apt install ./aqueduct_*.deb` on a clean Mint 22.3 install gets a working
 - **The fanotify hydration mode** (§2.1) — real files on ext4 that hydrate on read, with the
   `cp`-reads-zeros hazard documented rather than hidden. A genuinely interesting experiment and
   not on the path to a working product.
-- **Anything multi-account.** One account, until there is a reason.
+- **Chunked storage for large files** (design §6.7, A6) — splitting a large file into many Drive
+  objects so an edit re-sends only the affected pieces. It is the only way to get real delta
+  uploads against the public API, and it costs those files their usability from Drive's web
+  interface, from a phone and from Google's own clients. An opt-in for one nominated folder if the
+  upload cost ever becomes intolerable, and not before.
 - **Any file manager but Nemo.** The emblem APIs are not portable and the mount works everywhere
   regardless.
 
@@ -120,7 +140,9 @@ Exit: `apt install ./aqueduct_*.deb` on a clean Mint 22.3 install gets a working
 | Seven-day token cap survives publishing | A weekly `aqueduct auth` | Read-only-from-cache degradation and a notification, not a broken mount (§6.1) |
 | `alt=media` ignores `Range` for some file class | Whole-file fetches for those files | The 200 response is handled, not assumed away (§6.2) |
 | Change-feed latency is minutes, not seconds | Remote edits appear late | Never wait on the feed for our own writes; poll interval tunable (§6.5) |
-| A write pattern that rewrites large files repeatedly | Upload cost, and the 750 GB/day cap | Debounce, one upload at a time, and `aqueduct status` shows the backlog (§3.3) |
+| A write pattern that rewrites large files repeatedly | Hours of uplink per edit — the uplink binds long before Drive's 750 GB/day cap does | Hash-and-skip, coalescing, rate limiting, and the cost declared before it is spent (§3.3, §6.7). Not solvable: no public API sends a delta |
+| Parallel range fetches do not scale, and reads stay at one stream's throughput | The central premise of the read path fails; streaming large files stays slow | Measured in M2 as an exit criterion, before anything is built on top of it (§11.2a) |
+| 10⁶ metadata rows make ingest or `readdir` slow | A sluggish mount on a large account | SQLite is the tree rather than memory, paged `readdir`, resumable ingest, and the mount serves while ingest continues (§6.3, §6.5) |
 | `mmap` on the mount misbehaving with `writeback_cache` | Some application fails oddly | §11.9 tests it before M3 depends on it |
 | Nemo extension cannot refresh emblems live | Status goes stale until a refresh | `invalidate_extension_info()` exists; if it disappoints, the tray carries the status instead |
 
