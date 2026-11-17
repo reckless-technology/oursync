@@ -6,183 +6,112 @@ is specific to OurSync.
 
 ## What this is
 
-A streaming Google Drive filesystem for Linux Mint Cinnamon — a FUSE mount that fetches content on
-demand, caches it in sparse files, polls Drive's change feed, and uploads on close. Go 1.26.x.
+Google Drive streamed at `~/Drive` on Linux Mint, with chosen files kept on local disk. It is
+**shell scripts over `rclone`**, in [`rclone/`](rclone/), and that is the whole product. It is
+installed and working on `jonny-precision`.
 
-**[docs/design.md](docs/design.md) is the authority.** It records not only the design but the
-evidence for each decision and, in §9, the decisions themselves as a numbered list. Read it before
-proposing anything structural. §11 holds the questions that are genuinely open, each with the live
-test that would settle it — if you are about to assume one of those, run the test instead.
+Read [`rclone/README.md`](rclone/README.md) first. The next piece of work is a `.deb` so it can be
+shared — [docs/plan.md](docs/plan.md).
 
-## Status: PAUSED, and the premise is unverified. Read this before writing any code.
+## It was going to be a Go daemon, and measurement killed that
 
-**Paused by Jonny on 2026-11-17**, on a question he raised and was right to raise: does anything
-that already exists do this job?
+[docs/design.md](docs/design.md) specifies a FUSE daemon with a database, a change-feed poller, a
+fetch pool and fifteen components. **It was not built and should not be.** Its central claim — that
+one stream would not fill a fast downlink, so a parallel fetch pool was the design's most important
+decision — was measured against the real Drive and is false. A single range request averages
+65.5 MB/s on `jonny-precision` over Wi-Fi, parallel requests show no effect that clears the spread,
+and `rclone mount` keeps up at 62.3. Jonny's acceptance bar is 60.
 
-What that question turned up:
+[docs/measurements.md](docs/measurements.md) has every figure with its machine and date, including
+the runs that were void and why. Read it before proposing anything that assumes throughput is a
+problem here.
 
-- **GNOME's own Drive integration is a dead end.** `gnome-online-accounts` plus the `gvfsd-google`
-  GVfs backend is installed and working on `jonny-precision` — Mint ships it deliberately, with
-  its own patched panel — but GNOME 50 hid the Google "Files" toggle in March 2026, Debian dropped
-  the backend in gvfs 1.57.2-3 because "it relies on libgdata, which is de facto unmaintained", and
-  libgdata is archived. It also would not have served: one sequential GET at a time, no content
-  cache, no `mmap` handler in the FUSE bridge, native docs unopenable, duplicate names hidden,
-  permanent deletes. Do not build on it and do not wait for its rewrite.
-- **`rclone mount --vfs-cache-mode full` is the real incumbent**, and it already does most of what
-  §6.6 describes: on-demand range reads into a sparse persistent cache, range tracking, LRU
-  eviction, one mount per remote, and a normal FUSE mount any application can use. This was
-  under-weighted in the original research, which compared against rclone's defaults rather than a
-  tuned configuration.
-- **So the remaining justification is narrower than the design implies**: pinning ("available
-  offline"), per-file status in Nemo, and cross-account bandwidth scheduling. That is the whole
-  list.
-
-  This bullet used to end with a fourth item — whether a parallel fetch pool beats rclone's
-  "chunked sequential readahead", on the grounds that `--multi-thread-streams` applies to `copy` and
-  not to mount reads. **Both halves of that were wrong.** `rclone mount` has
-  **`--vfs-read-chunk-streams`**, "the number of parallel streams to read at once", so its reads are
-  not sequential-only; and the throughput question it was pointing at has since been closed by
-  measurement and by Jonny's acceptance bar. Nothing is left of it.
-
-**The measurement has been attempted and is not finished.** See
-[docs/measurements.md](docs/measurements.md) for every figure with its machine and date, including
-the ones that are void.
-
-Established, on `jonny-precision` over Wi-Fi, against Jonny's own Drive with his own OAuth client:
-a single range request averages 65.5 MB/s and runs at or above the link control beside it, parallel
-ranges show no effect, and `rclone mount` keeps up (62.3 MB/s at defaults, 77.6 tuned). **But that
-machine cannot answer the question**, because its link saturates at roughly one stream's rate, so a
-per-connection cap would be invisible on it.
-
-**The wired run is void.** It was taken on `reckless-ci-lin-0` while that machine ran another
-session's CI continuously, at a load average reaching 13.06 on 16 cores. A verdict was written from
-it and has been withdrawn.
-
-**Before measuring anything on a shared machine**: check for a chess match (`pgrep -x fastchess`,
-never `-f`), check for `Runner.Worker`, and read the load again **immediately before the first
-sample**. Reading it once at the start of a session is how this went wrong — it was 0.00 at 08:32
-and CI started at 08:35:32, three minutes later, and ran for the next half hour.
-
-**The throughput question is closed, by Jonny, 2026-11-17**:
-
-> "If we can consistently achieve 60MB/sec over Wi-Fi on the precision I'll be happy with that.
-> Don't stress about exactly what the speed is because it varies according to other users on the
-> network. My wife and kids also use the Internet. I think you're prematurely optimizing for a
-> problem that in real world conditions isn't an issue."
-
-**60 MB/s on precision's Wi-Fi is the bar, and a single stream already clears it** (65.5 mean), as
-does `rclone mount` at its defaults (62.3). §6.6 has been rewritten: the fetch pool is now a small
-latency convenience with a default of 2, **nothing in the design may be justified by parallelism**,
-and §11.2a is closed. Do not reopen the wired-gigabit version of this. It was parked deliberately,
-on a link that varies with household use, for a bottleneck that is not there.
-
-**What is actually undecided is whether this project should exist at all.** rclone meets the
-throughput bar today. What it does not give is pinning, per-file status in Nemo, and whatever the
-real pain of a 5 TB corpus turns out to be — small-file and metadata latency, listings, `stat`
-storms, opening a file from an application. That last is still unmeasured, and it is the only
-remaining technical argument for building anything. If it is also fine, the honest answer is a
-tuned `rclone mount` plus a thin status layer, or nothing.
-
-[docs/plan.md](docs/plan.md) has the build order for if it does go ahead; start at M0, and do not
-skip ahead — M0 and M1 exist to settle the refresh-token cap and the name mapping against real data
-before anything is built on them.
+**The design document is kept as research, not as a plan.** Its survey of the Drive API — the quota
+arithmetic, the name mapping, the failure modes, the absence of delta upload — is sound and still
+answers questions. Its architecture is history. The Go foundation under `internal/` is unused;
+removing it is a decision not yet taken.
 
 ## Decisions not to reopen without reading why
 
-Each of these was settled with evidence, not preference. Reversing one is fine; reversing one
-without reading §2 and §9 of the design is not.
-
-- **FUSE, not fanotify pre-content hooks.** The hooks were tested live on kernel 7.0 and they
-  work. They are still wrong here, chiefly because `cp` consults `SEEK_DATA`, finds a sparse
-  placeholder empty, and silently writes a file of zeros with no event fired. Five more reasons in
-  §2.1.
-- **go-fuse, low-level API, no libfuse.** go-fuse speaks `/dev/fuse` directly, so Mint's libfuse
-  3.14.0 lacking the passthrough API does not constrain us.
-- **Poll, never push.** `changes.watch` needs a public HTTPS endpoint; a relay would put Jonny's
-  data through a third-party server and drag the project into Google's security-assessment regime.
-- **ids are identity, never paths.** Drive allows duplicate names in one folder, allows `/` in a
-  name, and has no atomic rename-over.
-- **One stored `local_name` per node**, computed once at ingest, protected by
-  `UNIQUE(parent_id, local_name)`. Never re-derive a POSIX name from a Drive name at use time.
-- **No client ID ships in this repository.** Ever. See the README.
+- **No client ID ships in this repository. Ever.** A restricted scope in a distributed app needs
+  OAuth verification plus an annual third-party security assessment. Each user brings their own
+  Cloud project under Google's personal-use exemption. See [docs/plan.md](docs/plan.md).
 - **There is no delta upload, and no amount of cleverness finds one.** Verified 2026-11-16 against
   `files.update`, the resumable protocol, the revisions resource and the whole v3 method list: no
   write-at-offset, no append, no patch, no block or signature endpoint, no revision-from-diff.
   Google's *own* client has done differential uploads since October 2024 through something
-  undocumented, which is why this keeps looking possible. If you think you have found a way, you
-  have found an endpoint nobody has documented — check it twice before building on it.
-- **The read path is parallel by design.** One stream will not fill a gigabit link. Do not
-  simplify the fetch pool into a single sequential reader; the premise is measured in M2.
-- **Accounts are isolated; the link and the disk are not.** Per-account tokens, databases, caches
-  and quota budgets; one global fetch pool, upload queue and cache budget. Making the pools
-  per-account would let two accounts each saturate a 50 Mbit uplink.
+  undocumented, which is why this keeps looking possible. Measured against the real corpus it costs
+  little: of 40 files over 100 MB touched in a year, almost none were genuinely edited.
+- **`search_policy=epall`, not `ff`.** `ff` races the upstreams by response time; `epall` takes the
+  first in *configured* order. Local disk usually wins a race and sometimes does not, and "usually"
+  is not what a pin means.
+- **`:writeback` is not used.** It copies the whole file to local disk on first read, which is
+  caching everything — and the corpus is larger than the disk. It looks like exactly the right flag
+  and is exactly the wrong one.
+- **`:nc` on the local upstream.** Nothing is ever *created* on the local side by accident; a pin is
+  placed deliberately and nothing else writes there.
+- **The mount is `--read-only`**, because the remote holds the `drive.readonly` scope. A write
+  otherwise fails late and confusingly, part-way through a save. Removing the flag means
+  re-authorising the remote for read-write, which is Jonny's decision and not yet made.
+- **Credentials never go on a command line.** `--rc-pass` published the mount control password to
+  every account on the machine through `ps` and `/proc/*/cmdline`; it goes through `RCLONE_RC_PASS`
+  instead, which `/proc/*/environ` restricts to the owner.
 
 ## Working on it
 
+Shell, so `shellcheck` and plain POSIX-ish bash. There is no build.
+
+Install or re-install on a machine:
+
 ```sh
-make build          # -> ./oursyncd and ./oursync
-make check          # the full gate: tests plus vet plus gofmt
-make cover          # statement coverage, gated
+./rclone/install.sh
+systemctl --user enable --now oursync-mount.service
+oursync doctor
 ```
 
-Go, so `gofmt`, not clang-format — the 22.1.8 pin in the working-practice skill does not apply
-here. Build trees go under `build/`, as everywhere in this workspace.
+**It cannot be tested on Windows.** It needs `/dev/fuse` and a real mount. Test on
+`jonny-precision` (`ssh -4 jonny@jonny-precision.local`, Mint 22.3, kernel 7.0.0-42). It is Jonny's
+own laptop with his session live: work in a directory of your own, change no system settings, and
+clean up.
 
-**Checking a Linux build from Windows needs `CGO_ENABLED=0`.** This PC has `go env CC` set to
-MSYS2's clang (pawnstar-go's race detector needs it), so a bare `GOOS=linux go build` tries to
-compile `runtime/cgo` with a Windows clang and dies on `grp.h`. OurSync uses no cgo at all — that
-is the point of go-fuse and the pure-Go SQLite driver — so the right invocation is
-`CGO_ENABLED=0 GOOS=linux go build ./...`, which `make crosscheck` runs.
-
-**Do not edit `go.mod` or `go.sum`.** Every dependency the project needs is already required at a
-pinned version, held in place by `internal/deps` so `go mod tidy` cannot drop one before real code
-imports it. A new dependency is a decision — raise it rather than adding it.
-
-**The FUSE tests cannot run on Windows and will not run in CI.** They need `/dev/fuse` and a real
-mount. Run them on `jonny-precision` (`ssh -4 jonny@jonny-precision.local`, Mint 22.3, kernel
-7.0.0-42, Go 1.26.9 at `/usr/local/go/bin/go` which is **not** on the non-interactive PATH, and
-libfuse3-dev installed 2026-11-16). It is Jonny's own laptop with his session live: work in a
-directory of your own, change no system settings, and clean up.
-
-**CI is deliberately small.** The repository is private, so its jobs land on the self-hosted pool,
-which is one Linux machine — `reckless-ci-lin-0`, which is also the chess-match machine. Keep CI to
-`vet`, `test`, `gofmt -l` and the coverage gate. Check for a running match before pushing
-(`ssh -4 jonny@192.168.50.22 'pgrep -x fastchess'` — `-x`, never `-f`, which self-matches).
-
-**The live Drive tests** under `internal/drive/livetest/` are behind a build tag, use Jonny's real
-account, and spend his API quota. They never run in CI and never run unattended.
+**A pin test that does not mark the local copy proves nothing.** The VFS cache will serve a
+previously-read file at local-disk speed whether or not it is pinned, and the bytes are identical,
+so both timing and checksums agree with either answer. Use a file never read through the mount,
+append a marker to the local copy, invalidate, and compare. This was got wrong once already.
 
 ## Traps particular to this project
 
-- **The Drive Go client does not retry.** All 64 call sites in `drive-gen.go` use
-  `gensupport.SendRequest`, not `SendRequestWithRetry`; the backoff machinery in the package is
-  wired only into media uploads. Everything goes through our own `RoundTripper` (§6.2) — do not
-  add a direct call that bypasses it.
-- **A 403 is not one error.** `rateLimitExceeded` and `userRateLimitExceeded` are retryable;
-  `storageQuotaExceeded` is terminal; `downloadQuotaExceeded` is undocumented, real, and per-file.
-  The reason must be parsed from the body, since the status code does not distinguish them.
-- **Quota is metered in units, not requests**: 325,000 per user per minute, with a download at
-  **200** and a list at 100. Small readahead chunks are disproportionately expensive, which is why
-  chunks are 16 MiB.
+- **apt ships rclone 1.60.1** on Ubuntu 24.04, which Mint 22.3 is built on. Development and all
+  testing happened on **1.76.0**, installed by hand into `/usr/local/bin`. Nothing is tested against
+  1.60.1, so `Depends: rclone` in a package would be a guess. See the dependency section of
+  [docs/plan.md](docs/plan.md).
 - **`modifiedTime` can be in the future, and is in this Drive.** Seven 1 GiB DVD `.VOB` files
   created in July 2026 report `2036-02-07T01:58:15.000Z` — ten years ahead, read straight from the
   API, because Drive stores whatever `modifiedTime` an upload supplies and that rip carried the
   disc's own. Anything assuming `modifiedTime <= now`, resolving conflicts by "newest wins", or
   validating a cache entry by comparing timestamps will be wrong about these files for a decade.
-  Treat it as an opaque change marker, compared only for equality against the value last seen.
-- **Never advance a change token before the page is applied.** It goes in the same transaction as
-  the node updates, or changes are lost silently.
-- **Never wait on the change feed to confirm our own write.** The latency is undocumented and
-  anecdotally minutes.
+- **A 403 is not one error.** `rateLimitExceeded` and `userRateLimitExceeded` are retryable;
+  `storageQuotaExceeded` is terminal; `downloadQuotaExceeded` is undocumented, real, and per-file.
+  The reason must be parsed from the body; the status code does not distinguish them.
+- **Quota is metered in units, not requests**: 325,000 per user per minute, a download costing 200
+  and a list 100. Small, frequent reads are disproportionately expensive.
 - **`prompt=consent` is required as well as `access_type=offline`.** Without it, a second
-  authorisation of the same client returns no refresh token at all and the next run cannot refresh.
-  This has already cost time on the YouTube project in this workspace.
-- **The project's OAuth app is in Testing status**, which caps refresh tokens at seven days.
-  Whether publishing lifts it is open (§11.1), and `refresh_token_expires_in` near 604799 in the
-  token response is the one-minute test. Do not promise a permanent token.
+  authorisation of the same client returns no refresh token at all. This has already cost time on
+  the YouTube project in this workspace.
+- **Benchmarks must refuse a busy machine.** `tools/range-fetch-bench.sh` checks for `fastchess`
+  *and* `Runner.Worker` *and* the load average, immediately before the first sample, and records the
+  load on every row. A whole wired campaign was once taken on `reckless-ci-lin-0` during another
+  session's CI because the machine was checked once, half an hour earlier, when it was idle.
+- **A failed transfer reads as infinite speed.** `speed.cloudflare.com/__down` caps below 100 MiB
+  and answers `403`, then `429`, with a one-byte body; divided by a near-zero time that reported
+  416 MB/s on a 511 Mbit link. Every timed transfer asserts the bytes it received.
 
 ## Jonny's open decisions
 
-In §9 of the design, as A1 to A4: the repository name, whether to publish the Cloud app, the mount
-point, and whether mirror mode is wanted at all. Do not implement around them by guessing — A4 in
-particular governs the largest piece of work in the plan.
+Named in [docs/plan.md](docs/plan.md), and none of them is an engineering question:
+
+1. **The licence**, since the README still says proprietary and not for distribution.
+2. **Repository visibility**, currently private.
+3. **Whether writes are enabled**, which means re-authorising Drive with the full `drive` scope.
+4. **Whether the Google onboarding wall is acceptable** for the people he wants to share this with
+   — each needs their own Cloud project, and it cannot be removed.
