@@ -1,0 +1,224 @@
+#!/bin/bash
+# Aqueduct - stream Google Drive, and keep chosen files on local disk.
+#
+# Drive appears at ~/Drive. Nothing is downloaded until something reads it, and what is read is
+# cached and evicted as the cache fills. A file that must be fast is *pinned*: a real copy is placed
+# on local disk, and from then on reads are served from there and never evicted.
+#
+# How the two layers fit together:
+#
+#   ~/Drive                     an rclone mount of the union remote
+#     └─ union                  two upstreams, consulted in order
+#          ├─ <pin dir>:nc      local disk. ":nc" so new files are never created here by accident -
+#          │                    a pin is placed by this script, deliberately, and nothing else.
+#          └─ gdrive-own:       Drive itself
+#
+# search_policy=epall makes a read take the first upstream, in configured order, where the path
+# exists - so a pinned file is served from disk. action_policy=epall makes a write to an existing
+# file apply to *every* upstream holding it, so a pinned file cannot silently diverge from Drive.
+#
+# The ":writeback" modifier is deliberately not used. It copies the whole file to local disk on
+# first read, which is caching everything - and the corpus this is for is larger than the disk.
+set -u
+
+CONF="${AQUEDUCT_CONF:-$HOME/.config/aqueduct/aqueduct.conf}"
+# shellcheck source=/dev/null
+[ -r "$CONF" ] && . "$CONF"
+
+REMOTE="${REMOTE:-gdrive-own}"
+UNION="${UNION:-drive-pinned}"
+MOUNT="${MOUNT:-$HOME/Drive}"
+PIN_DIR="${PIN_DIR:-$HOME/.local/share/aqueduct/pinned}"
+CACHE_DIR="${CACHE_DIR:-$HOME/.cache/aqueduct}"
+CACHE_MAX_SIZE="${CACHE_MAX_SIZE:-20G}"
+CACHE_MAX_AGE="${CACHE_MAX_AGE:-72h}"
+RC_ADDR="${RC_ADDR:-127.0.0.1:5572}"
+RC_USER="${RC_USER:-aqueduct}"
+RC_PASS="${RC_PASS:-}"
+
+PROG=${0##*/}
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*" >&2; }
+
+# Turn a path the user gave us into a path relative to the mount root. Everything downstream - the
+# remote copy, the local pin, the cache invalidation - is keyed on this one string, so it is worth
+# being strict: a path outside the mount is a mistake, not something to interpret generously.
+rel_path() {
+    local p abs
+    p="$1"
+    abs=$(readlink -m -- "$p")
+    case "$abs/" in
+        "$MOUNT"/*) ;;
+        *) die "not inside $MOUNT: $p" ;;
+    esac
+    printf '%s' "${abs#"$MOUNT"/}"
+}
+
+rc() {
+    [ -n "$RC_PASS" ] || return 0
+    rclone rc --rc-addr "$RC_ADDR" --user "$RC_USER" --pass "$RC_PASS" "$@" > /dev/null 2>&1 || true
+}
+
+# After a pin or an unpin the mount still holds a file object bound to whichever upstream it
+# resolved to when it was listed, so without this the change is invisible until --dir-cache-time
+# expires. Forget the parent directory and the next open resolves again.
+forget() {
+    local rel parent
+    rel="$1"
+    parent=$(dirname -- "$rel")
+    [ "$parent" = "." ] && parent=""
+    rc vfs/forget dir="$parent"
+}
+
+human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || printf '%s bytes' "$1"; }
+
+cmd_pin() {
+    [ $# -gt 0 ] || die "usage: $PROG pin <path under $MOUNT> ..."
+    mountpoint -q "$MOUNT" || die "$MOUNT is not mounted - run '$PROG mount' first"
+    local rel target
+    for p in "$@"; do
+        rel=$(rel_path "$p") || exit 1
+        target="$PIN_DIR/$rel"
+        if [ -e "$target" ]; then
+            note "already pinned: $rel"
+            continue
+        fi
+        mkdir -p -- "$(dirname -- "$target")"
+        # Copy from the remote directly rather than through the mount: the union would otherwise be
+        # reading and writing the same logical path, and this way rclone verifies the transfer.
+        if [ -d "$MOUNT/$rel" ]; then
+            rclone copy "$REMOTE:$rel" "$target" --progress --log-level ERROR || die "pin failed: $rel"
+        else
+            rclone copyto "$REMOTE:$rel" "$target" --progress --log-level ERROR || die "pin failed: $rel"
+        fi
+        forget "$rel"
+        note "pinned: $rel"
+    done
+}
+
+cmd_unpin() {
+    [ $# -gt 0 ] || die "usage: $PROG unpin <path under $MOUNT> ..."
+    local rel target canonical
+    for p in "$@"; do
+        rel=$(rel_path "$p") || exit 1
+        target="$PIN_DIR/$rel"
+        # Never delete anything that is not inside the pin directory, whatever the argument said.
+        canonical=$(readlink -m -- "$target")
+        case "$canonical/" in
+            "$PIN_DIR"/*) ;;
+            *) die "refusing to remove something outside $PIN_DIR: $canonical" ;;
+        esac
+        if [ ! -e "$canonical" ]; then
+            note "not pinned: $rel"
+            continue
+        fi
+        # The copy in Drive is what makes this safe to delete, so check it is really there first.
+        if ! rclone lsjson "$REMOTE:$rel" --log-level ERROR > /dev/null 2>&1; then
+            die "refusing to unpin: $rel is not in $REMOTE, so the local copy is the only one"
+        fi
+        rm -rf -- "$canonical"
+        find "$PIN_DIR" -mindepth 1 -type d -empty -delete 2>/dev/null
+        forget "$rel"
+        note "unpinned: $rel"
+    done
+}
+
+cmd_list() {
+    [ -d "$PIN_DIR" ] || { note "nothing pinned"; return 0; }
+    local n total
+    n=$(find "$PIN_DIR" -type f 2>/dev/null | wc -l)
+    if [ "$n" -eq 0 ]; then note "nothing pinned"; return 0; fi
+    total=$(du -sb "$PIN_DIR" 2>/dev/null | cut -f1)
+    find "$PIN_DIR" -type f -printf '%s\t%P\n' 2>/dev/null \
+        | sort -rn \
+        | while IFS=$'\t' read -r sz rel; do
+              printf '%10s  %s\n' "$(human "$sz")" "$rel"
+          done
+    printf '\n%s pinned, %s on disk\n' "$n" "$(human "${total:-0}")"
+}
+
+cmd_status() {
+    [ $# -gt 0 ] || die "usage: $PROG status <path under $MOUNT> ..."
+    local rel
+    for p in "$@"; do
+        rel=$(rel_path "$p") || exit 1
+        if [ -e "$PIN_DIR/$rel" ]; then
+            printf 'pinned    %s\n' "$rel"
+        else
+            printf 'streamed  %s\n' "$rel"
+        fi
+    done
+}
+
+cmd_mount() {
+    mountpoint -q "$MOUNT" && { note "already mounted at $MOUNT"; return 0; }
+    mkdir -p -- "$MOUNT" "$CACHE_DIR" "$PIN_DIR"
+    local rcflags=()
+    if [ -n "$RC_PASS" ]; then
+        rcflags=(--rc --rc-addr "$RC_ADDR" --rc-user "$RC_USER" --rc-pass "$RC_PASS")
+    fi
+    # --read-only because the configured Drive remote holds the drive.readonly scope. Without it a
+    # write fails late and confusingly, part-way through a save; with it the filesystem says so at
+    # once. Remove this flag only together with re-authorising the remote for read-write.
+    rclone mount "$UNION:" "$MOUNT" \
+        --read-only \
+        --vfs-cache-mode full \
+        --cache-dir "$CACHE_DIR" \
+        --vfs-cache-max-size "$CACHE_MAX_SIZE" \
+        --vfs-cache-max-age "$CACHE_MAX_AGE" \
+        --vfs-read-chunk-size 64M \
+        --vfs-read-chunk-size-limit 2G \
+        --dir-cache-time 5m \
+        --poll-interval 1m \
+        --umask 022 \
+        "${rcflags[@]}" \
+        "$@"
+}
+
+cmd_unmount() {
+    fusermount -u "$MOUNT" 2>/dev/null || fusermount3 -u "$MOUNT" 2>/dev/null \
+        || die "could not unmount $MOUNT"
+    note "unmounted $MOUNT"
+}
+
+cmd_doctor() {
+    printf 'config       %s%s\n' "$CONF" "$([ -r "$CONF" ] || printf ' (missing, using defaults)')"
+    printf 'remote       %s  scope=%s\n' "$REMOTE" \
+        "$(rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^scope = //p')"
+    printf 'union        %s  upstreams=%s\n' "$UNION" \
+        "$(rclone config show "$UNION" 2>/dev/null | sed -n 's/^upstreams = //p')"
+    printf 'mount        %s  %s\n' "$MOUNT" \
+        "$(mountpoint -q "$MOUNT" && echo mounted || echo 'NOT MOUNTED')"
+    printf 'pin dir      %s  %s files, %s\n' "$PIN_DIR" \
+        "$(find "$PIN_DIR" -type f 2>/dev/null | wc -l)" \
+        "$(human "$(du -sb "$PIN_DIR" 2>/dev/null | cut -f1 || echo 0)")"
+    printf 'cache        %s  %s (limit %s)\n' "$CACHE_DIR" \
+        "$(human "$(du -sb "$CACHE_DIR" 2>/dev/null | cut -f1 || echo 0)")" "$CACHE_MAX_SIZE"
+    printf 'control      %s\n' \
+        "$([ -n "$RC_PASS" ] && echo "$RC_ADDR" || echo 'disabled - pins need up to --dir-cache-time to show')"
+    printf 'disk         %s\n' "$(df -h "$PIN_DIR" 2>/dev/null | tail -1)"
+}
+
+case "${1:-}" in
+    pin)      shift; cmd_pin "$@" ;;
+    unpin)    shift; cmd_unpin "$@" ;;
+    list|ls)  shift; cmd_list "$@" ;;
+    status)   shift; cmd_status "$@" ;;
+    mount)    shift; cmd_mount "$@" ;;
+    unmount|umount) shift; cmd_unmount "$@" ;;
+    doctor)   shift; cmd_doctor "$@" ;;
+    *)
+        cat >&2 <<USAGE
+$PROG - stream Google Drive at $MOUNT, with chosen files kept on local disk
+
+  $PROG pin <path>...      keep a real copy on disk; reads never touch the network again
+  $PROG unpin <path>...    remove the local copy; the file goes back to streaming
+  $PROG list               what is pinned, and what it costs on disk
+  $PROG status <path>...   pinned or streamed
+  $PROG mount [flags]      mount Drive at $MOUNT (runs in the foreground)
+  $PROG unmount            unmount it
+  $PROG doctor             show the whole configuration and its current state
+USAGE
+        exit 2 ;;
+esac
