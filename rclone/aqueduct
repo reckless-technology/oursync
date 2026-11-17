@@ -57,7 +57,11 @@ rel_path() {
 
 rc() {
     [ -n "$RC_PASS" ] || return 0
-    rclone rc --rc-addr "$RC_ADDR" --user "$RC_USER" --pass "$RC_PASS" "$@" > /dev/null 2>&1 || true
+    # Same reasoning as in cmd_mount: keep the password off the command line, where ps would show
+    # it to every account on the machine. The rc *client* reads --user/--pass as RCLONE_RC_USER and
+    # RCLONE_RC_PASS too, since they are the same flags.
+    RCLONE_RC_USER="$RC_USER" RCLONE_RC_PASS="$RC_PASS" \
+        rclone rc --rc-addr "$RC_ADDR" "$@" > /dev/null 2>&1 || true
 }
 
 # After a pin or an unpin the mount still holds a file object bound to whichever upstream it
@@ -154,9 +158,13 @@ cmd_status() {
 cmd_mount() {
     mountpoint -q "$MOUNT" && { note "already mounted at $MOUNT"; return 0; }
     mkdir -p -- "$MOUNT" "$CACHE_DIR" "$PIN_DIR"
+    # The control-port credentials go through the environment, not the command line. rclone reads
+    # any flag as RCLONE_<FLAG>, and a command line is world-readable through ps and /proc/*/cmdline
+    # while /proc/*/environ is readable only by the owner - so passing --rc-pass would publish the
+    # password to every account on the machine.
     local rcflags=()
     if [ -n "$RC_PASS" ]; then
-        rcflags=(--rc --rc-addr "$RC_ADDR" --rc-user "$RC_USER" --rc-pass "$RC_PASS")
+        export RCLONE_RC=true RCLONE_RC_ADDR="$RC_ADDR" RCLONE_RC_USER="$RC_USER" RCLONE_RC_PASS="$RC_PASS"
     fi
     # --read-only because the configured Drive remote holds the drive.readonly scope. Without it a
     # write fails late and confusingly, part-way through a save; with it the filesystem says so at
