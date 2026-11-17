@@ -1,0 +1,10 @@
+# Build trees and binaries (house rule: everything built lives under build/)
+build/
+coverage.out
+
+# Local state that must never be committed
+*.db
+*.db-wal
+*.db-shm
+client_secret*.json
+token.json
