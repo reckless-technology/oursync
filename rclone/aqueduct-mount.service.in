@@ -1,0 +1,22 @@
+[Unit]
+Description=Aqueduct - Google Drive streamed at @MOUNT@, with pinned files on local disk
+Documentation=https://rclone.org/commands/rclone_mount/
+# The mount is useless without a route out, and rclone started before the network is up spends its
+# first minutes failing listings that the VFS then caches as empty directories.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# `aqueduct mount` runs rclone in the foreground, which is what systemd wants; it reads the mount
+# flags and the pin directory from ~/.config/aqueduct/aqueduct.conf so they stay in one place.
+ExecStart=@BIN@/aqueduct mount
+ExecStop=/bin/fusermount -u @MOUNT@
+Restart=on-failure
+RestartSec=10s
+# A FUSE mount left behind by a crash makes the next start fail with "transport endpoint is not
+# connected", so clear it before starting rather than requiring a manual fusermount.
+ExecStartPre=-/bin/fusermount -u @MOUNT@
+
+[Install]
+WantedBy=default.target

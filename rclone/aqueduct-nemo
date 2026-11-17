@@ -1,0 +1,79 @@
+#!/bin/bash
+# The bridge between Nemo's right-click menu and `aqueduct`.
+#
+# It exists for two reasons that the main script should not carry:
+#
+#   - Nemo actions can be gated on the exit code of a program (`Conditions=exec ...`), so the menu
+#     can offer "Make available offline" only on a file that is streamed, and "Remove local copy"
+#     only on one that is pinned, instead of showing both everywhere including outside the mount.
+#   - A pin of a large file takes a while and Nemo gives no feedback of its own, so progress and
+#     completion are reported through desktop notifications.
+set -u
+
+CONF="${AQUEDUCT_CONF:-$HOME/.config/aqueduct/aqueduct.conf}"
+# shellcheck source=/dev/null
+[ -r "$CONF" ] && . "$CONF"
+MOUNT="${MOUNT:-$HOME/Drive}"
+PIN_DIR="${PIN_DIR:-$HOME/.local/share/aqueduct/pinned}"
+
+AQUEDUCT="${AQUEDUCT_BIN:-$HOME/.local/bin/aqueduct}"
+
+notify() {
+    command -v notify-send > /dev/null 2>&1 || return 0
+    notify-send -a Aqueduct -i drive-harddisk "$@" 2>/dev/null || true
+}
+
+# Relative path inside the mount, or non-zero if the path is not in it at all.
+rel_of() {
+    local abs
+    abs=$(readlink -m -- "$1") || return 1
+    case "$abs/" in
+        "$MOUNT"/*) printf '%s' "${abs#"$MOUNT"/}" ;;
+        *) return 1 ;;
+    esac
+}
+
+case "${1:-}" in
+    can-pin)
+        shift
+        [ $# -gt 0 ] || exit 1
+        for p in "$@"; do
+            rel=$(rel_of "$p") || exit 1
+            [ -e "$PIN_DIR/$rel" ] && exit 1   # already pinned: offer unpin instead
+        done
+        exit 0 ;;
+
+    can-unpin)
+        shift
+        [ $# -gt 0 ] || exit 1
+        for p in "$@"; do
+            rel=$(rel_of "$p") || exit 1
+            [ -e "$PIN_DIR/$rel" ] || exit 1
+        done
+        exit 0 ;;
+
+    pin)
+        shift
+        [ $# -gt 0 ] || exit 2
+        notify "Keeping offline" "$(basename -- "$1")${2+ and $(($# - 1)) more}"
+        if out=$("$AQUEDUCT" pin "$@" 2>&1); then
+            notify "Available offline" "$(basename -- "$1")${2+ and $(($# - 1)) more}"
+        else
+            notify -u critical "Could not keep offline" "$(printf '%s' "$out" | tail -1)"
+            exit 1
+        fi ;;
+
+    unpin)
+        shift
+        [ $# -gt 0 ] || exit 2
+        if out=$("$AQUEDUCT" unpin "$@" 2>&1); then
+            notify "Local copy removed" "$(basename -- "$1")${2+ and $(($# - 1)) more} - now streamed"
+        else
+            notify -u critical "Could not remove local copy" "$(printf '%s' "$out" | tail -1)"
+            exit 1
+        fi ;;
+
+    *)
+        printf 'usage: %s {can-pin|can-unpin|pin|unpin} <path>...\n' "${0##*/}" >&2
+        exit 2 ;;
+esac
