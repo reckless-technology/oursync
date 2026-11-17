@@ -867,6 +867,31 @@ consent fails that way.
 The Nemo extension and the tray aggregate across accounts, each reporting per-account state, since
 a user with two mounts wants one status icon rather than two.
 
+**The second account is a Workspace one, and it is not simply a copy of the first** (Jonny,
+2026-11-17: the `the Workspace account` Drive may be larger still than the personal account's 5 TB).
+Three consequences, and one of them can stop the account working at all:
+
+1. **Shared drives stop being speculative.** A consumer account cannot create one, so against the
+   personal account alone the whole `drives.list` / `corpora=drive` / per-drive-change-token path in
+   §6.5 is dead code that has never run. A Workspace account almost certainly has shared drives, so
+   that path becomes load-bearing and must be tested against this account rather than reasoned about.
+2. **Its authorisation is a different shape, and might be better.** A Workspace organisation can
+   host its own Cloud project with an **Internal** audience, which removes the unverified-app
+   warning, the 100-user cap and the seven-day refresh-token question in one step — the cleanest
+   auth story available anywhere in this design. That needs Jonny to be able to create a project in
+   that organisation.
+3. **Or it might be impossible, through no fault of the code.** Workspace administrators can
+   restrict third-party API access by OAuth client ID, and an unverified app requesting the
+   restricted `drive` scope is precisely what such a policy is for. The refusal arrives at consent
+   as `admin_policy_enforced`, and nothing in this repository can work around it — correctly so. If
+   Jonny administers the domain he can allowlist his own client ID; if he does not, this account may
+   simply be out of reach, and that has to be established before the multi-account path is built
+   rather than discovered at the end of it.
+
+The scale point reinforces §6.15's split rather than changing it: two corpora, each far larger than
+the disk, sharing one 267 GB cache budget and one 50 Mbit uplink is exactly the case a per-account
+fetch pool would handle badly. Decision 17 stands, and more firmly.
+
 ---
 
 ## 7. Failure modes, and what the user sees
@@ -962,6 +987,12 @@ Numbered so they can be cited and reversed on purpose rather than by drift.
 - **A6. Whether the chunked-storage option is wanted for one working folder** (§6.7), accepting that
   those files stop being readable from Drive's web interface and from Google's own clients in
   exchange for genuine delta uploads on large edits. Not needed until there is a reason.
+- **A7. Is the Workspace Drive in scope, and does Jonny administer that domain?** (§6.15) Two
+  separate answers are needed and the second only matters if the first is yes. In scope, it makes
+  the shared-drive path real and may offer a far better authorisation route; it may also be blocked
+  outright by an API-access policy he does not control. It is also work data on a personal laptop,
+  which is his call to make and not the design's — but the design should not assume it either way.
+  Needed before the multi-account path is built, not after.
 
 ---
 
