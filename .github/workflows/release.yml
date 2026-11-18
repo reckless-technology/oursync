@@ -99,10 +99,21 @@ jobs:
 
       - name: Install it and exercise it
         env:
-          RCLONE_VERSION: "1.76.0"
+          # NOT named RCLONE_VERSION. rclone reads any flag from RCLONE_<FLAG>, which is the whole
+          # reason the control-port password can be passed safely through the environment - and it
+          # means RCLONE_VERSION is read as --version, a boolean, so every later rclone call dies
+          # with `strconv.ParseBool: parsing "1.76.0"`. Keep workflow variables out of that
+          # namespace entirely rather than hoping a name is not a flag.
+          TARGET_RCLONE: "1.76.0"
         run: |
           set -euo pipefail
-          sudo apt-get install -y "./$(echo build/deb/oursync_*_all.deb)"
+          # --no-install-recommends, and it is about time rather than tidiness. The package
+          # Recommends nemo and libnotify-bin, so a plain install pulls nemo, gvfs, webkit2gtk,
+          # yelp, file-roller and gstreamer: on 2026-11-18 that took 32 minutes on a hosted
+          # runner's mirror and killed three release runs at the timeout, which was then blamed on
+          # the mirror and "fixed" by raising the cap twice. None of that tree is exercised here -
+          # the Nemo actions are files, and dpkg -L in build.yml is what checks they land.
+          sudo apt-get install -y --no-install-recommends "./$(echo build/deb/oursync_*_all.deb)"
           oursync version
           test "$(oursync version)" = "oursync ${{ steps.version.outputs.version }}"
           man --where oursync
@@ -115,14 +126,14 @@ jobs:
           # build.yml covers the other direction, asserting the unsupported versions are refused.
           (
             cd "$(mktemp -d)"
-            curl -fsSL -o SHA256SUMS "https://downloads.rclone.org/v$RCLONE_VERSION/SHA256SUMS"
+            curl -fsSL -o SHA256SUMS "https://downloads.rclone.org/v$TARGET_RCLONE/SHA256SUMS"
             curl -fsSL -o rclone.zip \
-              "https://downloads.rclone.org/v$RCLONE_VERSION/rclone-v$RCLONE_VERSION-linux-amd64.zip"
-            want=$(grep "rclone-v$RCLONE_VERSION-linux-amd64.zip" SHA256SUMS | awk '{print $1}')
+              "https://downloads.rclone.org/v$TARGET_RCLONE/rclone-v$TARGET_RCLONE-linux-amd64.zip"
+            want=$(grep "rclone-v$TARGET_RCLONE-linux-amd64.zip" SHA256SUMS | awk '{print $1}')
             got=$(sha256sum rclone.zip | awk '{print $1}')
-            [ "$want" = "$got" ] || { echo "::error::rclone $RCLONE_VERSION checksum mismatch"; exit 1; }
+            [ "$want" = "$got" ] || { echo "::error::rclone $TARGET_RCLONE checksum mismatch"; exit 1; }
             unzip -q rclone.zip
-            sudo install -m 755 "rclone-v$RCLONE_VERSION-linux-amd64/rclone" /usr/local/bin/rclone
+            sudo install -m 755 "rclone-v$TARGET_RCLONE-linux-amd64/rclone" /usr/local/bin/rclone
           )
           rclone version | head -1
 

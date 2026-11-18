@@ -126,6 +126,20 @@ bugs would have read as "1.60 is too old" had it been run there first.
   same mistake as the one above. `find "$HOME" -xdev` stays on the real filesystem and is what to
   reach for by default. Killing the local `ssh` client does **not** stop the remote `find`: check
   with `pgrep -ax find` and kill it by pid, or it keeps spending quota after you have moved on.
+- **Never name a variable `RCLONE_<anything>` unless you mean the flag.** rclone reads every flag
+  from `RCLONE_<FLAG>`, which is exactly why the control-port password can be passed safely through
+  the environment — and it means an innocent-looking workflow variable is a command-line argument.
+  `RCLONE_VERSION: "1.76.0"` in `release.yml` was read as `--version`, so every later rclone call
+  died with `strconv.ParseBool: parsing "1.76.0": invalid syntax`. The mechanism the project relies
+  on deliberately is the one that bites. Keep workflow and script variables out of that namespace
+  (`TARGET_RCLONE`, not `RCLONE_VERSION`) rather than hoping a name is not a flag.
+- **`apt install ./oursync.deb` pulls the whole GTK tree, and it is slow enough to kill a release.**
+  The package `Recommends: nemo, libnotify-bin`, and apt installs Recommends by default, so a plain
+  install drags in nemo, gvfs, webkit2gtk, yelp, file-roller and gstreamer. On 2026-11-18 that took
+  **32 minutes** on a hosted runner and killed three release runs at the timeout — which was twice
+  misread as a slow mirror and "fixed" by raising the cap. Use `--no-install-recommends` wherever
+  the Nemo integration is not the thing under test. And read the timestamps in a log before
+  blaming the network: the step names were different each time, but the minutes were all in apt.
 - **`vfs/forget` cannot make a new pin visible; only `vfs/refresh` can.** Measured on 1.76.0,
   2026-11-18, five runs of each and deterministic. A pin copies the file to local disk behind the
   mount's back, and the mount's object for that path was resolved when only the remote upstream held
