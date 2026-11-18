@@ -33,6 +33,8 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
   package built, lintian'd, installed, exercised and removed, and the rclone floor test against
   both the version apt ships and the current one. `release.yml` leaves a draft release, as the
   organisation's other products do.
+- An icon: Jonny's artwork at the seven hicolor sizes, installed by the package under the name
+  `oursync`, which is the name `oursync-nemo` hands to `notify-send`.
 - **The dependency floor is measured.** `tools/rclone-floor-test.sh` passes 16 of 16 on rclone
   1.60.1 (what Ubuntu 24.04 and Mint 22 ship) and on 1.76.0, on `jonny-precision`, 2026-11-17. So
   `Depends: rclone (>= 1.60)` is evidence. The test itself was wrong twice before it was right —
@@ -50,6 +52,13 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
   back. It works inside a folder of its own that it creates and removes, touches nothing else, and
   refuses to run against a read-only mount — verified refusing, 2026-11-17. All it needs is one
   re-consent: `oursync setup --scope drive`.
+
+  Until that is run, the product's headline feature is unproven against Google and the mount on
+  `jonny-precision` is read-only in practice, whatever the code can do.
+- **A Cloud project must be published to production**, which is a step in the walkthrough rather
+  than engineering, but it is the difference between a mount that keeps working and one that asks
+  for consent every seven days. Google ties that to the consent screen carrying no logo. Jonny's
+  own project was published on 2026-11-18 and its logo removed for exactly this reason.
 - **Shared drives and "shared with me"**, which are configuration rather than design, and the
   largest remaining gap after writes. [parity.md](parity.md) is the full audit against Drive for
   desktop, with how each row was established.
