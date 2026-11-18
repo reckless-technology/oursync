@@ -1,7 +1,7 @@
 [Unit]
 Description=OurSync - bring pinned files back into agreement with Drive
 Documentation=https://github.com/reckless-technology/oursync
-# Pointless without the mount, and its vfs/forget call needs the mount's control port.
+# Pointless without the mount, and its vfs/refresh call needs the mount's control port.
 After=oursync-mount.service
 Wants=oursync-mount.service
 

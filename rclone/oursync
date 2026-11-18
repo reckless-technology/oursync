@@ -105,14 +105,29 @@ rc() {
 }
 
 # After a pin, an unpin or a refresh the mount still holds a file object bound to whichever
-# upstream it resolved to when it was listed, so without this the change is invisible until
-# --dir-cache-time expires. Forget the parent directory and the next open resolves again.
-forget() {
-    local rel parent
-    rel="$1"
-    parent=$(dirname -- "$rel")
+# upstreams it resolved to when the directory was last listed. Without this the change is invisible
+# until --dir-cache-time expires, and for a pin it is worse than invisible: a save goes only to the
+# upstream the stale object knows about, so the pinned copy and Drive silently diverge.
+#
+# It must be a refresh, and not a forget. Measured on rclone 1.76.0 on jonny-precision, 2026-11-18,
+# five runs of each and deterministic: vfs/forget fails every single time, whether it is aimed at
+# the file (file=), at the parent directory (dir=) or at everything (no argument at all, which in
+# any case answers {"forgotten":[]} and forgets nothing). A forget only drops a cached listing;
+# only a *re-read* rebuilds the union object, and only the rebuilt object knows that both upstreams
+# now hold the path.
+#
+# Non-recursive, and only the parent directory. recursive=true from the root would re-list the whole
+# of Drive at 100 quota units a listing. The root is addressed by omitting dir entirely, because
+# dir="" answers "file does not exist".
+revalidate() {
+    local parent
+    parent=$(dirname -- "$1")
     [ "$parent" = "." ] && parent=""
-    rc vfs/forget dir="$parent"
+    if [ -z "$parent" ]; then
+        rc vfs/refresh
+    else
+        rc vfs/refresh dir="$parent"
+    fi
 }
 
 human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || printf '%s bytes' "$1"; }
@@ -163,7 +178,7 @@ cmd_pin() {
             rclone copyto "$REMOTE:$rel" "$target" --progress --log-level ERROR || die "pin failed: $rel"
         fi
         pins_add "$kind" "$rel"
-        forget "$rel"
+        revalidate "$rel"
         note "pinned: $rel"
     done
 }
@@ -192,7 +207,7 @@ cmd_unpin() {
         rm -rf -- "$canonical"
         find "$PIN_DIR" -mindepth 1 -type d -empty -delete 2>/dev/null
         pins_remove "$rel"
-        forget "$rel"
+        revalidate "$rel"
         note "unpinned: $rel"
     done
 }
@@ -262,7 +277,7 @@ cmd_refresh() {
         # does not have locally, and leaves a locally-newer file alone rather than overwriting it.
         if [ "$kind" = d ]; then
             if rclone copy "$REMOTE:$rel" "$target" --update --log-level ERROR 2>/dev/null; then
-                forget "$rel"
+                revalidate "$rel"
             else
                 note "refresh: could not read $rel from $REMOTE"
             fi
@@ -276,7 +291,7 @@ cmd_refresh() {
                 mkdir -p -- "$(dirname -- "$target")"
                 if rclone copyto "$REMOTE:$rel" "$target" --log-level ERROR 2>/dev/null; then
                     pulled=$((pulled + 1))
-                    forget "$rel"
+                    revalidate "$rel"
                 else
                     note "refresh: could not fetch $rel"
                 fi
@@ -300,7 +315,7 @@ cmd_refresh() {
         if [ "$rmt" -gt "$lcl" ]; then
             if rclone copyto "$REMOTE:$rel" "$target" --log-level ERROR 2>/dev/null; then
                 pulled=$((pulled + 1))
-                forget "$rel"
+                revalidate "$rel"
                 [ "$quiet" = yes ] || note "updated from Drive: $rel"
             else
                 note "refresh: could not update $rel from $REMOTE"

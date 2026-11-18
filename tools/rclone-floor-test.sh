@@ -222,17 +222,45 @@ else
         check "editing a pinned file through the mount reaches the local copy" \
             "EDITED-THROUGH-THE-MOUNT" "$(tr -d '\r\n' < "$PINNED/shared.txt")"
 
-        # vfs/forget is what makes a new pin visible at once instead of after --dir-cache-time, and
-        # it has to authenticate through RCLONE_RC_USER/PASS rather than a command line.
+        # The sequence the live run against Drive actually failed on, and the one --inplace alone
+        # does not fix: create a file through the mount, so :nc puts it in the remote upstream only,
+        # pin it afterwards the way `oursync pin` does, revalidate, then save it. The mount resolved
+        # its object for that path when only one upstream held it, and the save follows that stale
+        # object however many times it is repeated. Only a vfs/refresh of the parent directory
+        # rebuilds it; every form of vfs/forget leaves it stale. See `revalidate` in rclone/oursync.
+        printf 'BEFORE-PINNING\n' > "$MOUNT/late-pin.txt"
+        sync
+        for _ in $(seq 1 40); do
+            [ -e "$CLOUD/late-pin.txt" ] && break
+            sleep 0.25
+        done
+        rclone copyto "$CLOUD/late-pin.txt" "$PINNED/late-pin.txt" --log-level ERROR 2>/dev/null
+        RCLONE_RC_USER=oursync RCLONE_RC_PASS="$RC_PASS" \
+            rclone rc --rc-addr "$RC_ADDR" vfs/refresh > /dev/null 2>&1
+        sleep 1
+        printf 'SAVED-WHILE-PINNED\n' > "$MOUNT/late-pin.txt"
+        sync
+        for _ in $(seq 1 40); do
+            grep -q SAVED "$PINNED/late-pin.txt" 2>/dev/null && break
+            sleep 0.25
+        done
+        check "saving a file pinned after it was created reaches the remote copy" \
+            "SAVED-WHILE-PINNED" "$(tr -d '\r\n' < "$CLOUD/late-pin.txt")"
+        check "saving a file pinned after it was created reaches the local copy" \
+            "SAVED-WHILE-PINNED" "$(tr -d '\r\n' < "$PINNED/late-pin.txt")"
+
+        # vfs/refresh is what makes a new pin visible at once instead of after --dir-cache-time,
+        # and more than visible: correct. It has to authenticate through RCLONE_RC_USER/PASS rather
+        # than a command line, where ps would show the password to every account on the machine.
         out=$(RCLONE_RC_USER=oursync RCLONE_RC_PASS="$RC_PASS" \
-              rclone rc --rc-addr "$RC_ADDR" vfs/forget dir="" 2>&1)
-        if printf '%s' "$out" | grep -q '"forgotten"'; then
-            ok "rc vfs/forget authenticates through the environment"
+              rclone rc --rc-addr "$RC_ADDR" vfs/refresh 2>&1)
+        if printf '%s' "$out" | grep -q '"result"'; then
+            ok "rc vfs/refresh authenticates through the environment"
         else
-            bad "rc vfs/forget authenticates through the environment: $(printf '%s' "$out" | tr -d '\n' | cut -c1-120)"
+            bad "rc vfs/refresh authenticates through the environment: $(printf '%s' "$out" | tr -d '\n' | cut -c1-120)"
         fi
 
-        out=$(rclone rc --rc-addr "$RC_ADDR" vfs/forget dir="" 2>&1)
+        out=$(rclone rc --rc-addr "$RC_ADDR" vfs/refresh 2>&1)
         if printf '%s' "$out" | grep -qiE '401|unauthor'; then
             ok "the control port refuses an unauthenticated caller"
         else
