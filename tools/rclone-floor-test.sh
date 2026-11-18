@@ -205,6 +205,22 @@ else
             bad "a file written through the mount lands in the remote upstream: cloud=$([ -e "$CLOUD/written.txt" ] && echo yes || echo no) local=$([ -e "$PINNED/written.txt" ] && echo yes || echo no)"
         fi
 
+        # A file that exists in BOTH upstreams, edited through the mount. This is a pinned file
+        # being saved, and it is the case the live run against Drive caught on 2026-11-18: the
+        # remote copy took the new bytes and the local one kept the old, after which the mount
+        # served the stale local copy until the next refresh. Everything above writes either a new
+        # file or an existing one through rclone directly, and neither exercises this path.
+        printf 'EDITED-THROUGH-THE-MOUNT\n' > "$MOUNT/shared.txt"
+        sync
+        for _ in $(seq 1 40); do
+            grep -q EDITED "$CLOUD/shared.txt" 2>/dev/null && break
+            sleep 0.25
+        done
+        check "editing a pinned file through the mount reaches the remote copy" \
+            "EDITED-THROUGH-THE-MOUNT" "$(tr -d '\r\n' < "$CLOUD/shared.txt")"
+        check "editing a pinned file through the mount reaches the local copy" \
+            "EDITED-THROUGH-THE-MOUNT" "$(tr -d '\r\n' < "$PINNED/shared.txt")"
+
         # vfs/forget is what makes a new pin visible at once instead of after --dir-cache-time, and
         # it has to authenticate through RCLONE_RC_USER/PASS rather than a command line.
         out=$(RCLONE_RC_USER=oursync RCLONE_RC_PASS="$RC_PASS" \
