@@ -71,6 +71,26 @@ Print the whole configuration, its current state, and anything wrong with it.
 .TP
 .B version
 Print the version.
+.SH HELPER PROGRAMS
+.TP
+.B oursync\-setup
+What
+.B oursync setup
+runs. It builds the per-user configuration - the Drive remote, the union over it, the pin directory
+and the configuration file - and walks the one-time Google Cloud step when there is no remote yet.
+.B oursync\-setup \-\-help
+lists its options.
+.TP
+.B oursync\-nemo
+The bridge between Nemo's right-click menu and
+.BR oursync .
+Its
+.BR can\-pin / can\-unpin
+subcommands exit zero or non-zero so that a Nemo action's
+.B Conditions=exec
+shows each entry only where it applies, and its
+.BR pin / unpin
+subcommands report progress through desktop notifications. Not meant to be run by hand.
 .SH FILES
 .TP
 .I ~/.config/oursync/oursync.conf

@@ -18,24 +18,26 @@ Depends: ${misc:Depends},
          sed,
          findutils
 Recommends: nemo, libnotify-bin
-Description: Google Drive as a filesystem, streamed, with chosen files kept locally
- OurSync presents Google Drive as an ordinary directory tree, by default at ~/Drive.
- Nothing is downloaded until something reads it, so a Drive far larger than the local
- disk costs nothing to mount, and what has been read is cached and evicted as the cache
- fills. A file that must always be fast, or must survive going offline, is pinned: a real
- copy is placed on local disk, served from there, and never evicted.
+Description: Google Drive as a filesystem, with chosen files kept locally
+ OurSync presents Google Drive as an ordinary directory tree, by default at
+ ~/Drive. Nothing is downloaded until something reads it, so a Drive far larger
+ than the local disk costs nothing to mount, and what has been read is cached
+ and evicted as the cache fills. A file that must always be fast, or must
+ survive going offline, is pinned: a real copy is placed on local disk, served
+ from there, and never evicted.
  .
- Pinning is what OurSync adds to rclone, whose cache is eviction-based with no way to
- keep a chosen file. A union remote puts a local pin directory in front of the Drive
- remote, so a pinned file is served from disk deterministically, and a write to it
- reaches both copies.
+ Pinning is what OurSync adds to rclone, whose cache is eviction-based with no
+ way to keep a chosen file. A union remote puts a local pin directory in front
+ of the Drive remote, so a pinned file is served from disk deterministically,
+ and a write to it reaches both copies.
  .
- The mount is read-write when the Drive remote allows it. Changes made through the mount
- reach Drive by themselves; changes made to Drive elsewhere reach a streamed file within
- the poll interval and a pinned file when the refresh timer runs.
+ The mount is read-write when the Drive remote allows it. Changes made through
+ the mount reach Drive by themselves; changes made to Drive elsewhere reach a
+ streamed file within the poll interval and a pinned file when the refresh
+ timer runs.
  .
- Right-click entries for Nemo are included. Each user runs "oursync setup" once, which
- builds the per-user configuration and walks the one-time Google Cloud step: OurSync
- ships no OAuth client ID, because an application distributing its own client ID with
- Google's restricted drive scope needs OAuth verification and an annual third-party
- security assessment.
+ Right-click entries for Nemo are included. Each user runs "oursync setup"
+ once, which builds the per-user configuration and walks the one-time Google
+ Cloud step: OurSync ships no OAuth client ID, because an application
+ distributing its own client ID with Google's restricted drive scope needs
+ OAuth verification and an annual third-party security assessment.
