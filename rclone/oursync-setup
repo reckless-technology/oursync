@@ -131,14 +131,18 @@ verification plus an annually renewed third-party security assessment. A client 
 Google Cloud project falls under Google's personal-use exemption instead: no verification, no
 assessment, and an API quota nobody else is sharing.
 
-Once, in your browser:
+Once, in your browser. Each page after the first wants your new project selected, which it will
+be once you have created it:
 
-  1. console.cloud.google.com - create a project (any name).
-  2. APIs & Services > Library > "Google Drive API" > Enable.
-  3. APIs & Services > OAuth consent screen - User type External, fill in the app name and your
-     own email, and add your own Google account under Test users / Audience.
-  4. APIs & Services > Credentials > Create credentials > OAuth client ID,
-     Application type "Desktop app" > Create > Download JSON.
+  1. console.cloud.google.com/projectcreate - give it any name, Create.
+  2. console.cloud.google.com/apis/library/drive.googleapis.com - Enable.
+  3. console.cloud.google.com/auth/overview - "Get started". What used to be called the OAuth
+     consent screen is now Google Auth Platform: app name, your own email as support contact,
+     Audience "External", a contact email, agree.
+  4. console.cloud.google.com/auth/audience - under Test users, "Add users", your own Google
+     account. Without this, consent fails with access_denied.
+  5. console.cloud.google.com/auth/clients/create - Application type "Desktop app", Create, then
+     "Download JSON" from the client you just made.
 
 Then save that file as:
 
@@ -147,8 +151,8 @@ NOTES
     cat <<'NOTES'
 You will see an "unverified app" warning when you consent. That is expected: the app is yours and
 you have not paid Google to verify it. If Google starts demanding re-authorisation every seven
-days, set the project's publishing status to "In production" on the OAuth consent screen, which
-stops the test-mode refresh-token expiry.
+days, set the publishing status to "In production" at console.cloud.google.com/auth/overview,
+which stops the test-mode refresh-token expiry. It needs no verification and no review.
 NOTES
 }
 

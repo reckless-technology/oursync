@@ -83,7 +83,7 @@ A `.deb` for each release is on the
 [releases page](https://github.com/reckless-technology/oursync/releases).
 
 ```sh
-sudo apt install ./oursync_1.0.0_all.deb
+sudo apt install ./oursync_*_all.deb
 oursync setup                                        # once per user
 systemctl --user enable --now oursync-mount.service  # mount it now and at every login
 systemctl --user enable --now oursync-refresh.timer  # keep pinned files up to date
