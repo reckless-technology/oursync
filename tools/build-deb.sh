@@ -14,10 +14,17 @@ ROOT=$(pwd)
 OUT="$ROOT/build/deb"
 
 VERSION=$(sh tools/version.sh)
-# Not lsb_release -cs: on Mint that answers with Mint's own codename (zena), which is not a
-# distribution lintian knows, and it fails the package with bad-distribution-in-changes-file.
-# This field only matters for an archive upload, so the neutral value is the right default.
-DISTRIBUTION=${DISTRIBUTION:-unstable}
+# The changelog's distribution has to be one lintian's vendor knows, or the changes file is an
+# error. Two wrong answers found by building this on Mint: `lsb_release -cs` gives Mint's own
+# codename (zena), which lintian has never heard of, and "unstable" is a Debian suite that lintian
+# rejects on an Ubuntu-derived system. /etc/os-release has the right answer on all three - Mint
+# carries UBUNTU_CODENAME=noble beside its own VERSION_CODENAME=zena, Ubuntu carries only the
+# former, Debian only the latter.
+if [ -z "${DISTRIBUTION:-}" ]; then
+    # shellcheck source=/dev/null
+    . /etc/os-release 2>/dev/null || true
+    DISTRIBUTION=${UBUNTU_CODENAME:-${VERSION_CODENAME:-unstable}}
+fi
 HEADLINE=${HEADLINE:-"OurSync $VERSION"}
 DATE=$(date -R)
 
