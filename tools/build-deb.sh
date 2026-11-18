@@ -20,11 +20,15 @@ VERSION=$(sh tools/version.sh)
 # rejects on an Ubuntu-derived system. /etc/os-release has the right answer on all three - Mint
 # carries UBUNTU_CODENAME=noble beside its own VERSION_CODENAME=zena, Ubuntu carries only the
 # former, Debian only the latter.
-if [ -z "${DISTRIBUTION:-}" ]; then
+#
+# Sourced in a subshell, and that part is load-bearing: /etc/os-release sets VERSION, so sourcing
+# it here replaced this script's own VERSION with "22.3 (Zena)" and the build died on "version
+# number does not start with digit".
+DISTRIBUTION=${DISTRIBUTION:-$(
     # shellcheck source=/dev/null
     . /etc/os-release 2>/dev/null || true
-    DISTRIBUTION=${UBUNTU_CODENAME:-${VERSION_CODENAME:-unstable}}
-fi
+    printf '%s' "${UBUNTU_CODENAME:-${VERSION_CODENAME:-unstable}}"
+)}
 HEADLINE=${HEADLINE:-"OurSync $VERSION"}
 DATE=$(date -R)
 
