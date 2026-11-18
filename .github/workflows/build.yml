@@ -79,7 +79,13 @@ jobs:
           sudo apt-get update
           # dpkg-dev, not devscripts: dpkg-buildpackage lives in dpkg-dev, while devscripts
           # is the wrapper suite around it and pulls several hundred packages.
-          sudo apt-get install -y --no-install-recommends dpkg-dev debhelper lintian fakeroot
+          #
+          # build-essential is here although nothing in this package compiles: Debian policy makes
+          # it an implicit build dependency, so dpkg-checkbuilddeps refuses the build without it.
+          # Installing it is what a real Debian builder has; `dpkg-buildpackage -d` would skip the
+          # check instead and skip every other build dependency with it.
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev debhelper lintian fakeroot build-essential
       - name: Build it
         run: tools/build-deb.sh
       - name: lintian
