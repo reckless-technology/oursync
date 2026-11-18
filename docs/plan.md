@@ -41,11 +41,15 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
 
 ## Next
 
-- **The live write test.** Everything above is proved against a union of two local directories,
-  which is all the union policies can tell apart, plus a read-only Drive. The remote still holds
-  `drive.readonly`, so the one thing not yet exercised against Google is a real upload. That needs
-  one re-consent (`oursync setup --scope drive`) and then: create, edit, rename, delete, a pinned
-  file edited on both sides, and a save larger than the write-back delay.
+- **The live write test**, which is written and waiting: `tools/live-write-test.sh`. Everything
+  above is proved against a union of two local directories, which is all the union policies can
+  tell apart, plus a read-only Drive. The remote still holds `drive.readonly`, so the one thing not
+  yet exercised against Google is a real upload. The script covers create, edit, rename, delete and
+  its trash, a 24 MiB file, repeated saves inside the write-back window, a pinned file written
+  through the mount reaching both copies, and a pinned file changed in Drive behind the mount's
+  back. It works inside a folder of its own that it creates and removes, touches nothing else, and
+  refuses to run against a read-only mount — verified refusing, 2026-11-17. All it needs is one
+  re-consent: `oursync setup --scope drive`.
 - **Shared drives and "shared with me"**, which are configuration rather than design, and the
   largest remaining gap after writes. [parity.md](parity.md) is the full audit against Drive for
   desktop, with how each row was established.

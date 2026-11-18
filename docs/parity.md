@@ -49,9 +49,9 @@ nothing has demonstrated it yet.
 
 ## Next, in order
 
-1. **The live write test.** Everything in the two-way rows was proved against a union of two local
-   directories, which is all the union's policies can distinguish, plus a read-only Drive. One
-   re-consent (`oursync setup --scope drive`) and then: create, edit, rename, delete, a pinned file
-   edited on both sides, and a save larger than the write-back delay.
+1. **The live write test**, written as `tools/live-write-test.sh` and waiting on one re-consent
+   (`oursync setup --scope drive`). Everything in the two-way rows was proved against a union of
+   two local directories, which is all the union's policies can distinguish, plus a read-only
+   Drive. The script works in a folder of its own that it creates and removes.
 2. **Shared drives and "shared with me"**, which are configuration rather than design.
 3. **A conflict copy**, so a conflict does not need a person reading a journal.
