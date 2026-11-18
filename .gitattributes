@@ -1,7 +1,5 @@
 # This is a Linux-only project edited partly from Windows. Everything checks out LF, because a
-# CRLF shell script is a "bad interpreter" error on the machine that runs it and a CRLF Makefile
-# recipe fails the same way. Git's warning on commit from Windows is what prompted this.
+# CRLF shell script is a "bad interpreter" error on the machine that runs it, and that is the
+# whole product. Git's warning on commit from Windows is what prompted this.
 * text=auto eol=lf
 *.sh text eol=lf
-*.go text eol=lf
-Makefile text eol=lf

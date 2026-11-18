@@ -1,0 +1,20 @@
+OurSync - third-party parts
+
+OurSync contains none. It is shell script, and the Debian package it builds carries nothing but
+those scripts, their templates and their documentation. Nothing is vendored, fetched at build time
+or statically linked, so there is no third-party source in this repository and no third-party code
+in the binary package.
+
+What it needs at run time, and does not distribute:
+
+  rclone              MIT      the mount, the union and the transfers. OurSync is a layer over it:
+                               `rclone mount` of a union remote, `rclone copyto` for a pin, and
+                               `rclone rc` to invalidate the mount's directory cache. Debian's
+                               package relationship is a dependency, which is what the GNU General
+                               Public License asks of a program in a separate process.
+  fuse3 (fusermount3) GPL-2+   unmounting, through rclone.
+  Nemo                GPL-2+   the right-click entries, which are two small .nemo_action files of
+                               OurSync's own. Nemo itself is unmodified and optional.
+  Google Drive                 the service the files live on. Google's API terms apply to the OAuth
+                               client each user creates in their own Google Cloud project; OurSync
+                               ships no client ID and asks for no credential of its own.

@@ -20,7 +20,7 @@ exists to make the saying possible either way.
 
 ## Setup, 2026-11-17
 
-A read-only Drive remote on `the personal Google account`, scope `drive.readonly` only.
+A read-only Drive remote on the personal Google account, scope `drive.readonly` only.
 
 Two OAuth clients were used, and the difference between them is itself a finding:
 
@@ -181,8 +181,8 @@ Jonny closed the throughput question on 2026-11-17, before the wired re-run happ
 
 > "If we can consistently achieve 60MB/sec over Wi-Fi on the precision I'll be happy with that.
 > Don't stress about exactly what the speed is because it varies according to other users on the
-> network. My wife and kids also use the Internet. I think you're prematurely optimizing for a
-> problem that in real world conditions isn't an issue."
+> network. [...] I think you're prematurely optimizing for a problem that in real world conditions
+> isn't an issue."
 
 **60 MB/s on precision's Wi-Fi.** Measured there: a single range request averages 65.5 MB/s over
 twelve samples, and `rclone mount` gives 62.3 at its defaults and 77.6 tuned. The bar is met by the

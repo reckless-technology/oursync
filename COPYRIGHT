@@ -1,0 +1,26 @@
+OurSync
+
+Copyright (C) 2026 Jonny Reckless.
+
+Reckless Technology is the name under which Jonny Reckless publishes this software.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details. You should have received a copy of the GNU General Public
+License along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+The full text of that licence is in LICENSE, which holds nothing else: it is the Free Software
+Foundation's text byte for byte, so that it is recognised for what it is.
+
+Two things here are not covered by that licence:
+
+  - rclone, which OurSync requires at run time and does not contain. It is a separate program under
+    the MIT licence, distributed by its own authors from rclone.org; no part of it is copied into
+    this repository or into the package OurSync builds. NOTICE says what OurSync asks of it.
+  - the Reckless Technology name, the company's mark and its product icons, which are trademarks
+    and brand artwork: the GNU General Public License grants no right to use them to pass work off
+    as Reckless Technology's.

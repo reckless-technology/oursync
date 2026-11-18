@@ -53,7 +53,7 @@ Four consequences follow, and they are the spine of the rest of this document:
 
 **The corpus is on a consumer account, confirmed 2026-11-17**, which is worth stating because it was
 checked and because it closes off a tempting escape route. Jonny has two Chrome profiles and two
-Google accounts — `the personal Google account` (personal) and a Workspace one — and the 5 TB is on the
+Google accounts — a personal one and a Workspace one — and the 5 TB is on the
 personal one. Had it been on the Workspace account, §6.1's auth problems would largely have
 dissolved: an **Internal** OAuth audience removes the unverified-app warning, the 100-user cap and
 the seven-day refresh-token question in one go, and shared drives and domain-wide delegation become
@@ -384,7 +384,7 @@ libsecret through cgo. Fallback, for a machine with no Secret Service: a file at
 disk in the clear. (`os.Chmod` to 0600 is honoured on Linux; the note in the YouTube skill about
 it being a no-op applies to Windows and NTFS ACLs, not here.)
 
-**The Cloud project.** Jonny already has `an existing Cloud project` on `the personal Google account`: a
+**The Cloud project.** Jonny already has a Cloud project on the personal account: a
 Desktop-app OAuth client, consent screen "Reckless Technology uploader", External. Reusing it
 means enabling the Drive API in that project and adding the `drive` scope — so first run is
 *one console visit*, not six, and that is the documented happy path in the README.
@@ -878,7 +878,7 @@ The Nemo extension and the tray aggregate across accounts, each reporting per-ac
 a user with two mounts wants one status icon rather than two.
 
 **The second account is a Workspace one, and it is not simply a copy of the first** (Jonny,
-2026-11-17: the `the Workspace account` Drive may be larger still than the personal account's 5 TB).
+2026-11-17: the Workspace account's Drive may be larger still than the personal account's 5 TB).
 Three consequences, and one of them can stop the account working at all:
 
 1. **Shared drives stop being speculative.** A consumer account cannot create one, so against the
@@ -958,7 +958,7 @@ Numbered so they can be cited and reversed on purpose rather than by drift.
 12. **Mirror mode is ordinary files**, separate from the mount, and declares its own capability
     requirement.
 13. **A `.deb`**, with a `systemd --user` service. Not Flatpak, not AppImage (§6.14).
-14. **Bring-your-own OAuth client**, reusing `an existing Cloud project` with a second Desktop client
+14. **Bring-your-own OAuth client**, reusing the existing Cloud project with a second Desktop client
     (§6.1). No client ID will ever ship in this repository.
 15. **The read path is chunked and mostly sequential**, with 16 MiB chunks sized by the quota meter,
     partial chunks streamed through to the reader, and readahead only for handles that have proved
@@ -983,7 +983,7 @@ Numbered so they can be cited and reversed on purpose rather than by drift.
 
 - **A1. Repository name.** `oursync` — it carries content on demand over a distance, and it sits
   beside `trebuchet` without pretending to be a Google product. Say the word and it is renamed.
-- **A2. Publishing `an existing Cloud project` to "In production"** to escape the seven-day refresh-token
+- **A2. Publishing the Cloud project to "In production"** to escape the seven-day refresh-token
   cap. His consent screen and his Google account, so his call. It would also end the weekly
   re-auth on YouTube uploads, and the cost is a homepage and privacy-policy URL under Branding
   (both already exist on recklesstechnology.com) plus clicking through an "unverified app" warning

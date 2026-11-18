@@ -8,3 +8,4 @@ coverage.out
 *.db-shm
 client_secret*.json
 token.json
+debian/changelog
