@@ -19,6 +19,13 @@ override_dh_auto_build:
 	for s in oursync oursync-setup oursync-nemo; do 		sed -e 's|@VERSION@|$(VERSION)|g' rclone/$$s > $(STAGE)/$$s; 		chmod 755 $(STAGE)/$$s; 	done
 	for f in rclone/nemo/*.nemo_action.in rclone/oursync-mount.service.in 	         rclone/oursync-refresh.service.in rclone/oursync-refresh.timer.in; do 		sed -e 's|@BIN@|/usr/bin|g' $$f > $(STAGE)/`basename $$f .in`; 		chmod 644 $(STAGE)/`basename $$f .in`; 	done
 
+	# The icon goes into the hicolor theme under the name `oursync`, which is what
+	# oursync-nemo passes to notify-send. dh_icons adds the cache-refresh trigger.
+	for s in 16 32 48 64 128 256 512; do \
+		mkdir -p $(STAGE)/icons/$${s}x$${s}/apps; \
+		cp icons/oursync-$$s.png $(STAGE)/icons/$${s}x$${s}/apps/oursync.png; \
+	done
+
 override_dh_auto_clean:
 # Only what this file stages. dpkg-buildpackage runs `clean` before the build, so removing
 # the whole of build/ here would delete the output directory the caller had just made.

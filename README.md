@@ -1,3 +1,5 @@
+<img src="icons/oursync-256.png" alt="" width="128" align="right">
+
 # OurSync
 
 **Google Drive on Linux Mint: streamed, synchronised both ways, with the files you choose kept on

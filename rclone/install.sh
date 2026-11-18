@@ -14,6 +14,7 @@ HERE=$(cd -- "$(dirname -- "$0")" && pwd)
 BIN="$HOME/.local/bin"
 ACTIONS="$HOME/.local/share/nemo/actions"
 UNITS="$HOME/.config/systemd/user"
+ICONS="$HOME/.local/share/icons/hicolor"
 
 # MAJOR.MINOR.BUILD from the tags, the same rule the package uses, so a from-source install reports
 # a version that can be told apart from a released one by its commit count.
@@ -34,6 +35,19 @@ for f in "$HERE"/nemo/*.nemo_action.in; do
     chmod 644 "$out"
     echo "installed $out"
 done
+
+# The icon is installed under the name `oursync`, which is the name oursync-nemo hands to
+# notify-send; without it every pin notification falls back to a blank placeholder.
+for s in 16 32 48 64 128 256 512; do
+    src="$HERE/../icons/oursync-$s.png"
+    [ -e "$src" ] || continue
+    mkdir -p "$ICONS/${s}x${s}/apps"
+    cp -- "$src" "$ICONS/${s}x${s}/apps/oursync.png"
+done
+if command -v gtk-update-icon-cache > /dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f "$ICONS" 2>/dev/null || true
+fi
+echo "installed the icon into $ICONS"
 
 for f in "$HERE"/oursync-*.service.in "$HERE"/oursync-*.timer.in; do
     [ -e "$f" ] || continue

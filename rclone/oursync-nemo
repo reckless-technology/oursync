@@ -22,7 +22,7 @@ OURSYNC="${OURSYNC_BIN:-$(command -v oursync || printf '%s' "$HOME/.local/bin/ou
 
 notify() {
     command -v notify-send > /dev/null 2>&1 || return 0
-    notify-send -a OurSync -i drive-harddisk "$@" 2>/dev/null || true
+    notify-send -a OurSync -i oursync "$@" 2>/dev/null || true
 }
 
 # Relative path inside the mount, or non-zero if the path is not in it at all.

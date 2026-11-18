@@ -6,3 +6,4 @@ build/staged/11_oursync-unpin.nemo_action  usr/share/nemo/actions
 build/staged/oursync-mount.service         usr/lib/systemd/user
 build/staged/oursync-refresh.service       usr/lib/systemd/user
 build/staged/oursync-refresh.timer         usr/lib/systemd/user
+build/staged/icons/*                       usr/share/icons/hicolor

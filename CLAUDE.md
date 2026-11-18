@@ -75,7 +75,15 @@ Shell, so `shellcheck -S style` and plain POSIX-ish bash. There is no compile st
 ./rclone/install.sh                 # per-user install from a checkout, then runs oursync setup
 tools/rclone-floor-test.sh          # does this rclone do everything OurSync asks? (no network)
 tools/build-deb.sh                  # the package, into build/deb/
+python3 tools/make-icons.py         # only when icons/source/ changes
 ```
+
+**The icon is Jonny's artwork, and the committed PNGs are the deliverable.** `icons/source/` holds
+what he supplied — a dark circle on white — and `tools/make-icons.py` finds the circle, cuts it out
+with an anti-aliased alpha and writes the seven hicolor sizes. The PNGs are committed so a package
+build needs neither Python nor Pillow. The icon installs under the name `oursync`, which is what
+`oursync-nemo` hands to `notify-send`: rename it and every pin notification silently falls back to
+a blank placeholder.
 
 **It cannot be tested on Windows.** It needs `/dev/fuse` and a real mount. Test on
 `jonny-precision` (`ssh -4 jonny@jonny-precision.local`, Mint 22.3, kernel 7.0.0-42). It is Jonny's
@@ -113,6 +121,11 @@ bugs would have read as "1.60 is too old" had it been run there first.
   build dependency check.
 - **Never run `lsof +D ~/Drive`.** It walks the whole mount, which means listing 5 TB of Drive: it
   hangs, and it spends quota doing it. To find what has the mount open, read `/proc/*/fd` instead.
+- **Nor anything else that walks `$HOME`.** The mount lives *inside* the home directory, so a plain
+  `find ~ -name something` descends into all of Drive — it looks like an ordinary search and is the
+  same mistake as the one above. `find "$HOME" -xdev` stays on the real filesystem and is what to
+  reach for by default. Killing the local `ssh` client does **not** stop the remote `find`: check
+  with `pgrep -ax find` and kill it by pid, or it keeps spending quota after you have moved on.
 - **A union upstream that is a local path takes no trailing colon.** The colon belongs on a remote
   *name* (`gdrive-own:`). `/path:nc` is a path with a modifier; `/path:` is a remote that does not
   exist, and the union silently carries on with one upstream.

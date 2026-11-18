@@ -123,6 +123,18 @@ jobs:
           systemd-analyze verify --user /usr/lib/systemd/user/oursync-mount.service || true
           test -f /usr/lib/systemd/user/oursync-refresh.timer
           test -f /usr/share/nemo/actions/10_oursync-pin.nemo_action
+          echo "--- the icon, under the name notify-send is given ---"
+          # Each PNG must really be the size of the directory holding it. A mismatch is a lintian
+          # error, and a theme lookup that silently picks a different size is worse than an error.
+          for s in 16 32 48 64 128 256 512; do
+            icon="/usr/share/icons/hicolor/${s}x${s}/apps/oursync.png"
+            test -f "$icon"
+            got=$(file -b "$icon" | sed -n 's/.*PNG image data, \([0-9]*\) x \([0-9]*\).*/\1x\2/p')
+            if [ "$got" != "${s}x${s}" ]; then
+              echo "::error::$icon is $got, not ${s}x${s}"; exit 1
+            fi
+          done
+          echo "all seven sizes are present and are the size they claim"
           echo "--- removal ---"
           sudo apt-get remove -y oursync
           # Test the files, not `command -v oursync`: this shell ran oursync a moment ago, so bash
@@ -132,6 +144,7 @@ jobs:
                    /usr/lib/systemd/user/oursync-mount.service \
                    /usr/lib/systemd/user/oursync-refresh.timer \
                    /usr/share/nemo/actions/10_oursync-pin.nemo_action \
+                   /usr/share/icons/hicolor/256x256/apps/oursync.png \
                    /usr/share/man/man1/oursync.1.gz; do
             if [ -e "$f" ]; then echo "::error::$f survived removal"; exit 1; fi
           done
