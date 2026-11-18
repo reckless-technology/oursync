@@ -31,10 +31,6 @@ SCOPE=""
 CLIENT_SECRET=""
 FORCE_REAUTH=no
 
-# rclone 1.60 is what Ubuntu 24.04 and Mint 22 ship, and every feature OurSync uses is tested
-# against it in CI. Older than that is untested rather than known-broken.
-RCLONE_FLOOR=1.60
-
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
 rule() { printf '\n%s\n\n' "------------------------------------------------------------------------"; }
@@ -92,11 +88,25 @@ esac
 
 command -v rclone > /dev/null || die "rclone is not installed (apt install rclone, or rclone.org/install)"
 
-rclone_version=$(rclone version 2>/dev/null | head -1 | sed -n 's/^rclone v\([0-9.]*\).*/\1/p')
-if [ -n "$rclone_version" ]; then
-    lowest=$(printf '%s\n%s\n' "$RCLONE_FLOOR" "$rclone_version" | sort -V | head -1)
-    [ "$lowest" = "$RCLONE_FLOOR" ] \
-        || note "WARNING: rclone $rclone_version is older than $RCLONE_FLOOR, which is the oldest version tested."
+# Check the rclone version HERE, before the Google consent, and refuse rather than warn. Everything
+# below this line is ten minutes of somebody's afternoon in the Cloud console, and an unusable
+# rclone means the mount will not start at the end of it - which is a miserable place to find out.
+#
+# The check itself lives in the oursync program, and is called rather than copied. This file used
+# to carry its own RCLONE_FLOOR and its own comparison, and when the floor moved to 1.67 this copy
+# was left at 1.60: setup ran clean to the end on a stock Mint 22 and only the mount objected. One
+# constant, one message, nothing to drift. Sibling first, as `oursync setup` does in reverse, so a
+# copy run straight out of a checkout checks itself rather than whichever one is on PATH.
+here=$(dirname -- "$(readlink -f -- "$0")")
+if [ -x "$here/oursync" ]; then
+    oursync_bin="$here/oursync"
+else
+    oursync_bin=$(command -v oursync 2>/dev/null || true)
+fi
+if [ -n "$oursync_bin" ]; then
+    "$oursync_bin" check-rclone || die "rclone is not usable by OurSync - see above. Nothing has been changed."
+else
+    note "WARNING: cannot find the oursync program, so the rclone version has not been checked."
 fi
 
 mkdir -p -- "$CONF_DIR" "$MOUNT" "$PIN_DIR" "$CACHE_DIR"

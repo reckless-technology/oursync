@@ -517,6 +517,14 @@ case "${1:-}" in
     mount)    shift; cmd_mount "$@" ;;
     unmount|umount) shift; cmd_unmount "$@" ;;
     doctor)   shift; cmd_doctor "$@" ;;
+    # The floor lives here and only here. oursync-setup calls this rather than carrying its own
+    # copy of the version and the comparison, which is exactly how the two drifted: 6b5da9a moved
+    # the floor to 1.67 in this file and left setup warning about 1.60, so a stock Mint 22 got all
+    # the way through the Google consent before the mount refused to start.
+    #
+    # Deliberately absent from `help` and the man page: it is an entry point for oursync-setup, and
+    # `doctor` is the same check with everything else a person actually wants. Not an omission.
+    check-rclone) shift; require_usable_rclone ;;
     # The sibling first, so a copy run straight out of a checkout uses its own setup rather than
     # whichever one happens to be on PATH.
     setup)
