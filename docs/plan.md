@@ -20,6 +20,15 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
   a new file created in the mount goes to Drive and never to local disk, which is what `:nc` is
   for. `oursync refresh` carries a remote change into a pinned copy, and reports a conflict rather
   than resolving one. `oursync-refresh.timer` runs it every five minutes.
+
+  **That took two fixes, and neither is sufficient alone** — measured 2026-11-18, both ways round.
+  Without `--inplace` the VFS uploads to `<name>.<hash>.partial` and renames it over the target, so
+  a save is a *create*, which `:nc` keeps out of the local upstream. And a file created through the
+  mount is pinned afterwards, behind the mount's back, so the mount's object for that path was
+  resolved when only one upstream held it and every later save follows that stale object; only a
+  `vfs/refresh` of the parent rebuilds it, and no form of `vfs/forget` does. Dropping either fix
+  puts a pinned-write check back on the floor. The first was found by the live run against Drive,
+  the second by a fixture that reproduces it with no Google involved.
 - The mount's read-only flag is derived from the remote's own scope, so a read-only token gives an
   immediate `EROFS` instead of an API refusal half-way through a save.
 - `oursync pin / unpin / refresh / list / status / mount / unmount / setup / doctor / version`, a
@@ -35,28 +44,32 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
   organisation's other products do.
 - An icon: Jonny's artwork at the seven hicolor sizes, installed by the package under the name
   `oursync`, which is the name `oursync-nemo` hands to `notify-send`.
-- **The dependency floor is measured.** `tools/rclone-floor-test.sh` passes 16 of 16 on rclone
-  1.60.1 (what Ubuntu 24.04 and Mint 22 ship) and on 1.76.0, on `jonny-precision`, 2026-11-17. So
-  `Depends: rclone (>= 1.60)` is evidence. The test itself was wrong twice before it was right —
-  see the comment in it about the trailing colon — which is why it was first run where the answer
-  was already known.
+- **The dependency floor is measured, and it is not a single `>=`.** `tools/rclone-floor-test.sh`
+  passes 20 of 20 on 1.67.0, 1.68.1, 1.68.2, 1.70.3 and 1.76.0, and fails on everything below 1.67
+  and on 1.68.0, run against rclone's own release binaries on `jonny-precision`, 2026-11-18:
+
+  | rclone | result |
+  |---|---|
+  | 1.60.1, 1.61.1, 1.62.2 | no `--inplace`, so the mount will not start |
+  | 1.63.0, 1.63.1, 1.64.2, 1.66.0 | the union does not carry an update to both upstreams, with no mount involved |
+  | 1.67.0 | 20 of 20 |
+  | 1.68.0 | cannot parse `rc_addr` from the environment, which is how the control-port credentials are passed |
+  | 1.68.1, 1.68.2, 1.70.3, 1.76.0 | 20 of 20 |
+
+  Because that is not expressible as one `>=`, and because PATH decides which rclone runs while
+  dpkg cannot see one installed from rclone.org into `/usr/local/bin`, the floor is enforced by
+  `require_usable_rclone` in the program and `Depends: rclone` carries no version. Mint 22 and
+  Ubuntu 24.04 ship 1.60.1, so installing the current rclone is now a documented first step.
+
+  The test itself was wrong twice before it was right — see the comment in it about the trailing
+  colon — which is why it was first run where the answer was already known. The same discipline
+  caught the `--inplace` regression: the floor test had not been run on 1.60.1 since `--inplace`
+  was added, and that one flag silently moved the floor seven minor versions.
 
 ## Next
 
-- **A pinned file written through the mount goes stale locally.** Found by the first live run
-  against Drive, 2026-11-18 on `jonny-precision`: 14 of 15 checks passed, and the one that failed
-  is the one the test itself calls the worst failure this design can have. Writing a pinned file
-  through the mount updates Drive and leaves the local copy on its old bytes, so until the next
-  `oursync refresh` the mount serves what you just overwrote — `search_policy=epall` takes the
-  local upstream first, and it is the stale one.
-
-  The cause is that the VFS writes a whole object rather than updating one, so the union routes it
-  through CREATE, which `:nc` excludes the local upstream from, rather than through ACTION, where
-  `epall` would have written both. `:nc` is load-bearing — it is what keeps new files off a disk
-  far smaller than the corpus — so this is a design question, not a flag to flip, and the refresh
-  timer heals it within five minutes rather than leaving it wrong for ever.
-- **The live write test** has now been run, and everything else in it passed against the real
-  Drive: create, edit, rename, delete and its recoverable trash, 24 MiB byte for byte, repeated
+- **The live write test** passes 15 of 15 against the real Drive, 2026-11-18 on `jonny-precision`:
+  create, edit, rename, delete and its recoverable trash, 24 MiB byte for byte, repeated
   saves inside the write-back window, and a remote change pulled into a pinned copy.
   `tools/live-write-test.sh` works inside a folder of its own at the top of Drive that it creates
   and removes, touches nothing else, and refuses to run against a read-only mount. It should be

@@ -132,6 +132,51 @@ revalidate() {
 
 human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || printf '%s bytes' "$1"; }
 
+# Which rclone can actually do this, measured rather than assumed. tools/rclone-floor-test.sh run
+# against rclone's own release binaries on jonny-precision, 2026-11-18:
+#
+#   1.60.1 1.61.1 1.62.2  fail - no --inplace at all, so the mount will not even start
+#   1.63.0 1.63.1 1.64.2 1.66.0
+#                         fail - the union does not carry an update to both upstreams, with no
+#                                mount involved, so a pinned file would diverge on every save
+#   1.67.0                20 of 20
+#   1.68.0                fail - cannot parse rc_addr from the environment, which is exactly how
+#                                the control-port credentials are passed (see cmd_mount)
+#   1.68.1 1.68.2 1.70.3 1.76.0
+#                         20 of 20
+#
+# So the floor is 1.67, with 1.68.0 excluded: it is not monotonic, which is why this is a check in
+# the program and not only a Depends. The deeper reason it has to be here is that PATH decides which
+# rclone runs, and dpkg cannot see one installed from rclone.org into /usr/local/bin - which is the
+# normal way to get a current rclone on Mint 22, whose apt ships 1.60.1. A versioned Depends is
+# therefore both too strict (it blocks a machine with a perfectly good /usr/local/bin/rclone) and
+# too lax (it says nothing about the one that will actually run).
+RCLONE_FLOOR=1.67
+rclone_version() { rclone version 2>/dev/null | head -1 | sed -n 's/^rclone v\([0-9.]*\).*/\1/p'; }
+
+# Refuses rather than warns. The failure it prevents is silent: the save appears to work, Drive
+# takes the new bytes, and the local copy the mount serves keeps the old ones.
+require_usable_rclone() {
+    local v
+    v=$(rclone_version)
+    [ -z "$v" ] && return 0   # unknown build (a -DEV or a fork): let it try rather than refuse
+    if [ "$v" = "1.68.0" ]; then
+        note "PROBLEM: rclone 1.68.0 cannot read the mount's control-port address from the"
+        note "         environment, and OurSync will not put a password on a command line."
+        note "         Install any other version - 1.68.1 and newer are fine."
+        return 1
+    fi
+    if [ "$(printf '%s\n%s\n' "$RCLONE_FLOOR" "$v" | sort -V | head -1)" != "$RCLONE_FLOOR" ]; then
+        note "PROBLEM: rclone $v is too old for OurSync, which needs $RCLONE_FLOOR or newer."
+        note "         Below that, a save to a pinned file reaches Drive but not the local copy,"
+        note "         and the mount then serves what you just overwrote. That is silent, so it"
+        note "         is refused here rather than warned about."
+        note "         The current rclone installs with:  curl https://rclone.org/install.sh | sudo bash"
+        return 1
+    fi
+    return 0
+}
+
 # The pin list records what the user asked to keep, which is not the same as what is on disk: a
 # pinned *directory* must gain the files Drive gains, and only the list knows it was pinned as a
 # directory rather than as the files it happened to hold. It lives beside the configuration rather
@@ -364,6 +409,7 @@ cmd_status() {
 
 cmd_mount() {
     mountpoint -q "$MOUNT" && { note "already mounted at $MOUNT"; return 0; }
+    require_usable_rclone || return 1
     mkdir -p -- "$MOUNT" "$CACHE_DIR" "$PIN_DIR"
     # The control-port credentials go through the environment, not the command line. rclone reads
     # any flag as RCLONE_<FLAG>, and a command line is world-readable through ps and /proc/*/cmdline
@@ -444,6 +490,7 @@ cmd_doctor() {
     printf 'disk         %s\n' "$(df -h "$PIN_DIR" 2>/dev/null | tail -1)"
 
     command -v rclone > /dev/null || { note "PROBLEM: rclone is not installed"; problems=1; }
+    require_usable_rclone || problems=1
     if [ -z "$scope" ]; then
         note "PROBLEM: no rclone remote called '$REMOTE' - run '$PROG setup'"
         problems=1

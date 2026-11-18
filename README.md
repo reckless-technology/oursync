@@ -104,12 +104,21 @@ token belongs to a person, so this is the half each user runs for themselves. It
 and will not overwrite a configuration file you already have. `oursync setup --scope drive.readonly`
 installs a read-only Drive instead, if that is what you want.
 
-Requirements: Linux Mint 22 / Ubuntu 24.04 or newer, `fuse3`, and **rclone 1.60 or newer**. That
-floor is measured, not guessed: `tools/rclone-floor-test.sh` exercises every rclone feature OurSync
-depends on — the union's `:nc` and `epall` policies, the VFS cache flags, the write path through
-the mount, the control port and the single-file `lsjson` that `refresh` reads — and CI runs it
-against the version apt ships as well as the current one. A newer rclone from
-[rclone.org](https://rclone.org/install/) is faster at large reads and works equally well.
+Requirements: Linux Mint 22 / Ubuntu 24.04 or newer, `fuse3`, and **rclone 1.67 or newer, but not
+1.68.0**. Mint 22 and Ubuntu 24.04 ship rclone 1.60.1, which is *not* enough, so install the
+current one first — this is rclone's own recommended route and takes a few seconds:
+
+```sh
+curl https://rclone.org/install.sh | sudo bash
+```
+
+That floor is measured, not guessed. `tools/rclone-floor-test.sh` exercises every rclone feature
+OurSync depends on — the union's `:nc` and `epall` policies, the VFS cache flags, the write path
+through the mount, the control port and the single-file `lsjson` that `refresh` reads — and it was
+run against rclone's own release binaries from 1.60.1 to 1.76.0 on 2026-11-18. Below 1.67 a save to
+a pinned file reaches Drive but not the local copy, and 1.68.0 alone cannot read the mount's
+control-port address from the environment. OurSync checks this itself and refuses to mount rather
+than let either failure happen quietly, because both are silent.
 
 From a checkout, without a package: `./rclone/install.sh` installs the same thing under `$HOME`,
 needing no root.

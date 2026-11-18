@@ -126,6 +126,27 @@ bugs would have read as "1.60 is too old" had it been run there first.
   same mistake as the one above. `find "$HOME" -xdev` stays on the real filesystem and is what to
   reach for by default. Killing the local `ssh` client does **not** stop the remote `find`: check
   with `pgrep -ax find` and kill it by pid, or it keeps spending quota after you have moved on.
+- **`vfs/forget` cannot make a new pin visible; only `vfs/refresh` can.** Measured on 1.76.0,
+  2026-11-18, five runs of each and deterministic. A pin copies the file to local disk behind the
+  mount's back, and the mount's object for that path was resolved when only the remote upstream held
+  it, so every later save follows that stale object and goes only to Drive. A forget drops a cached
+  listing; only a *re-read* rebuilds the union object. `vfs/forget` fails aimed at the file
+  (`file=`), at the parent (`dir=`) and at everything — and with no argument it answers
+  `{"forgotten":[]}` and forgets **nothing**, so "forget everything" is not available. A remount
+  also fixes it, which is what locates the staleness. Use the parent directory, non-recursively:
+  `recursive=true` from the root re-lists the whole of Drive at 100 quota units a listing. The root
+  is addressed by omitting `dir`, because `dir=""` answers "file does not exist".
+- **`--inplace` is load-bearing and it moved the dependency floor seven minor versions.** Without
+  it the VFS uploads to `<name>.<hash>.partial` and renames, making a save a *create*, which `:nc`
+  keeps out of the local upstream. It does not exist before rclone 1.63, and the union does not
+  carry an update to both upstreams before 1.67, so the floor is **1.67 or newer, excluding
+  1.68.0**, which cannot parse `rc_addr` from the environment — the one place OurSync must use the
+  environment, since a password on a command line is readable through `ps`. Not monotonic, so it is
+  not a single `>=`: `require_usable_rclone` enforces it in the program and `Depends: rclone` is
+  unversioned, because PATH decides which rclone runs and dpkg cannot see one installed from
+  rclone.org into `/usr/local/bin`. **Run the floor test against old rclone after any mount-flag
+  change** — the `--inplace` regression existed for a day because the test had only been re-run on
+  the current version.
 - **A union upstream that is a local path takes no trailing colon.** The colon belongs on a remote
   *name* (`gdrive-own:`). `/path:nc` is a path with a modifier; `/path:` is a remote that does not
   exist, and the union silently carries on with one upstream.
