@@ -2,9 +2,12 @@ name: build
 
 # OurSync is shell, so there is nothing to compile and the whole of CI is: is it well-formed, does
 # it package, and does the rclone it claims to support actually do what it asks? The third is the
-# one that earns its keep - the dependency line in debian/control is a measurement taken here, not
-# a guess, because Ubuntu 24.04 (which Mint 22 is built on) ships rclone 1.60.1 while development
-# happened on 1.76.
+# one that earns its keep. The floor is 1.67 or newer excluding 1.68.0 - measured, not guessed, and
+# not expressible as a single ">=" - so it is enforced by require_usable_rclone in the program and
+# `Depends: rclone` carries no version. The matrix below therefore tests both directions: that the
+# versions above the floor work, and that the ones below it are refused by name. Ubuntu 24.04,
+# which Mint 22 is built on, ships 1.60.1 and is one of the refused ones, which is why installing
+# the current rclone is a documented first step in the README.
 #
 # This repository is public, so every job runs on a GitHub-hosted image and none of it touches the
 # organisation's self-hosted machines.
@@ -163,14 +166,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The version Mint and Ubuntu ship, which is what "Depends: rclone (>= 1.60)" claims.
-          - label: "from apt (the floor)"
+          # The version Mint 22 and Ubuntu 24.04 ship. It is BELOW the measured floor, so what is
+          # asserted here is that OurSync *refuses* it - see docs/plan.md for the whole table. The
+          # refusal is the entire protection against a pinned file diverging silently, so it is
+          # worth a CI job of its own on the exact version the target distribution ships.
+          - label: "1.60.1 from apt - must be refused"
             source: apt
+            expect: refused
+          # The floor itself.
+          - label: "1.67.0 - the floor"
+            source: upstream
+            version: "1.67.0"
+            expect: pass
+          # The one version above the floor that must still be refused: it cannot read rc_addr from
+          # the environment, and OurSync will not put the control-port password on a command line.
+          # This is why the floor is not a single ">=".
+          - label: "1.68.0 - must be refused"
+            source: upstream
+            version: "1.68.0"
+            expect: refused
           # And the current one, so a newer rclone that drops or renames something is caught here
           # rather than on somebody's machine after an upgrade.
           - label: "current from rclone.org"
             source: upstream
             version: "1.76.0"
+            expect: pass
     steps:
       - uses: actions/checkout@v5
       - name: Install rclone and fuse3
@@ -196,4 +216,30 @@ jobs:
           fi
           rclone version | head -2
       - name: Does this rclone do everything OurSync asks of it?
+        if: matrix.expect == 'pass'
         run: tools/rclone-floor-test.sh
+
+      # Two assertions, and both matter. The floor test must fail, because if it passes then the
+      # floor is wrong and the refusal is costing users a working rclone. And the program must
+      # refuse it by name, because that is what turns a silent divergence into a message. Either
+      # one alone could pass for the wrong reason.
+      - name: Is this rclone correctly refused?
+        if: matrix.expect == 'refused'
+        run: |
+          set -uo pipefail
+          sed -e "s|@VERSION@|0.0.0-ci|g" rclone/oursync > /tmp/oursync
+          chmod +x /tmp/oursync
+          if tools/rclone-floor-test.sh > /tmp/floor.log 2>&1; then
+            echo "::error::the floor test PASSED on $(rclone version | head -1), which OurSync refuses - the floor is wrong"
+            tail -30 /tmp/floor.log
+            exit 1
+          fi
+          echo "the floor test fails on this version, as expected:"
+          grep -E '^FAIL|passed,' /tmp/floor.log || tail -5 /tmp/floor.log
+          if /tmp/oursync doctor 2>&1 | grep -qiE 'is too old for OurSync|cannot read the mount'; then
+            echo "and the program refuses it by name"
+          else
+            echo "::error::the program did NOT refuse $(rclone version | head -1)"
+            /tmp/oursync doctor 2>&1 | head -30
+            exit 1
+          fi
