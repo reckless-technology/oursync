@@ -149,8 +149,9 @@ if [ -z "$existing_type" ]; then
 
     client_id=$(read_json_field client_id "$CLIENT_SECRET")
     client_secret=$(read_json_field client_secret "$CLIENT_SECRET")
-    [ -n "$client_id" ] && [ -n "$client_secret" ] \
-        || die "$CLIENT_SECRET has no client_id/client_secret - download the Desktop app client JSON again"
+    if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+        die "$CLIENT_SECRET has no client_id/client_secret - download the Desktop app client JSON again"
+    fi
     chmod 600 -- "$CLIENT_SECRET" 2>/dev/null || true
 
     note "Creating remote '$REMOTE' with scope '$SCOPE'. rclone will ask about the browser."

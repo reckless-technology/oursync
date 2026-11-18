@@ -131,21 +131,31 @@ jobs:
             exit 1
           fi
           [ "$state" = true ] && gh release delete "$TAG" --yes
+          # The notes go through a file rather than --notes. A quoted argument spanning lines has
+          # to keep every line indented past the `run: |` block, or the block scalar ends and the
+          # workflow stops being valid YAML - which it did, and GitHub reports that as a failed run
+          # with no jobs and no log.
+          {
+            echo "Install on Linux Mint 22 / Ubuntu 24.04 or newer:"
+            echo
+            echo '```sh'
+            echo "sudo apt install ./oursync_${VERSION}_all.deb"
+            echo "oursync setup"
+            echo "systemctl --user enable --now oursync-mount.service"
+            echo "systemctl --user enable --now oursync-refresh.timer"
+            echo '```'
+            echo
+            echo "Needs rclone 1.60 or newer, which is what apt ships; every feature OurSync uses"
+            echo "is tested against that version in CI."
+            echo
+            echo "\`oursync setup\` walks the one-time Google Cloud step. OurSync ships no OAuth"
+            echo "client ID, because an application distributing its own with Google's restricted"
+            echo "drive scope needs OAuth verification and an annually renewed third-party"
+            echo "security assessment."
+          } > build/deb/notes.md
           gh release create "$TAG" \
             --draft \
             --title "OurSync $VERSION" \
-            --notes "Install on Linux Mint 22 / Ubuntu 24.04 or newer:
-
-    sudo apt install ./oursync_${VERSION}_all.deb
-    oursync setup
-    systemctl --user enable --now oursync-mount.service
-    systemctl --user enable --now oursync-refresh.timer
-
-Needs rclone 1.60 or newer, which is what apt ships; every feature OurSync uses is tested against
-that version in CI.
-
-\`oursync setup\` walks the one-time Google Cloud step. OurSync ships no OAuth client ID, because
-an application distributing its own with Google's restricted drive scope needs OAuth verification
-and an annually renewed third-party security assessment." \
+            --notes-file build/deb/notes.md \
             build/deb/*.deb build/deb/SHA256SUMS
           gh release view "$TAG"

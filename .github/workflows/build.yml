@@ -28,6 +28,22 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
+      - name: Install the pinned shellcheck
+        env:
+          # Pinned, for the reason the organisation pins clang-format: the runner image shipped
+          # 0.9.0 while development used 0.11.0, and 0.9.0 reports SC2015 on two lines that 0.11.0
+          # does not. A linter that differs between a desk and CI fails work that is actually
+          # clean, or passes work that is not.
+          SHELLCHECK_VERSION: "0.11.0"
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          curl -fsSL -o sc.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          tar -xJf sc.tar.xz
+          sudo install -m 755 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          hash -r
+          test "$(shellcheck --version | sed -n 's/^version: //p')" = "$SHELLCHECK_VERSION"
       - name: shellcheck, at style level, on every script in the repository
         run: |
           set -euo pipefail

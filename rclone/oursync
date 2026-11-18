@@ -120,7 +120,7 @@ human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || printf '%s bytes' "$1";
 # pinned *directory* must gain the files Drive gains, and only the list knows it was pinned as a
 # directory rather than as the files it happened to hold. It lives beside the configuration rather
 # than inside the pin directory, because anything inside that directory shows up in the mount.
-pins_read() { [ -r "$PIN_LIST" ] && cat -- "$PIN_LIST" || true; }
+pins_read() { if [ -r "$PIN_LIST" ]; then cat -- "$PIN_LIST"; fi; }
 
 pins_write() {
     mkdir -p -- "$CONF_DIR"

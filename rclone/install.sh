@@ -17,7 +17,7 @@ UNITS="$HOME/.config/systemd/user"
 
 # MAJOR.MINOR.BUILD from the tags, the same rule the package uses, so a from-source install reports
 # a version that can be told apart from a released one by its commit count.
-VERSION=$(cd -- "$HERE/.." && tools/version.sh 2>/dev/null || echo "0.0.0")
+VERSION=$(cd -- "$HERE/.." && sh tools/version.sh 2>/dev/null || echo "0.0.0")
 
 mkdir -p "$BIN" "$ACTIONS" "$UNITS"
 

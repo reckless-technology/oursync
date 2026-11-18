@@ -13,7 +13,7 @@ cd -- "$(dirname -- "$0")/.."
 ROOT=$(pwd)
 OUT="$ROOT/build/deb"
 
-VERSION=$(tools/version.sh)
+VERSION=$(sh tools/version.sh)
 DISTRIBUTION=${DISTRIBUTION:-$( (lsb_release -cs 2>/dev/null) || echo unstable )}
 HEADLINE=${HEADLINE:-"OurSync $VERSION"}
 DATE=$(date -R)
