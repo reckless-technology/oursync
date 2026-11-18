@@ -98,15 +98,37 @@ jobs:
         run: lintian --fail-on error --tag-display-limit 0 build/deb/*.changes
 
       - name: Install it and exercise it
+        env:
+          RCLONE_VERSION: "1.76.0"
         run: |
           set -euo pipefail
           sudo apt-get install -y "./$(echo build/deb/oursync_*_all.deb)"
           oursync version
           test "$(oursync version)" = "oursync ${{ steps.version.outputs.version }}"
-          oursync doctor
           man --where oursync
-          # The same functional test CI runs on every push, against the rclone this image has, so
-          # nothing is released that the installed rclone cannot actually drive.
+
+          # This image's apt rclone is 1.60.1, which is below OurSync's measured floor, so the
+          # package's own unversioned dependency pulls a version OurSync refuses to run on - by
+          # design, since dpkg cannot see an rclone installed from rclone.org and PATH is what
+          # decides. The question a release has to answer is whether a *supported* rclone can drive
+          # it, so install the one the README tells users to install and exercise against that.
+          # build.yml covers the other direction, asserting the unsupported versions are refused.
+          (
+            cd "$(mktemp -d)"
+            curl -fsSL -o SHA256SUMS "https://downloads.rclone.org/v$RCLONE_VERSION/SHA256SUMS"
+            curl -fsSL -o rclone.zip \
+              "https://downloads.rclone.org/v$RCLONE_VERSION/rclone-v$RCLONE_VERSION-linux-amd64.zip"
+            want=$(grep "rclone-v$RCLONE_VERSION-linux-amd64.zip" SHA256SUMS | awk '{print $1}')
+            got=$(sha256sum rclone.zip | awk '{print $1}')
+            [ "$want" = "$got" ] || { echo "::error::rclone $RCLONE_VERSION checksum mismatch"; exit 1; }
+            unzip -q rclone.zip
+            sudo install -m 755 "rclone-v$RCLONE_VERSION-linux-amd64/rclone" /usr/local/bin/rclone
+          )
+          rclone version | head -1
+
+          oursync doctor
+          # The same functional test CI runs on every push, so nothing is released that a supported
+          # rclone cannot actually drive.
           tools/rclone-floor-test.sh
 
       - name: Checksums
