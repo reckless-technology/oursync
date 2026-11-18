@@ -46,9 +46,9 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
   `drive.readonly`, so the one thing not yet exercised against Google is a real upload. That needs
   one re-consent (`oursync setup --scope drive`) and then: create, edit, rename, delete, a pinned
   file edited on both sides, and a save larger than the write-back delay.
-- **Parity with Drive for desktop**, item by item, so the gaps are a list rather than an
-  impression. Known gaps: one account per installation; no shared drives configured; Google-native
-  documents appear as stubs; no per-file emblems outside Nemo; no bandwidth scheduling.
+- **Shared drives and "shared with me"**, which are configuration rather than design, and the
+  largest remaining gap after writes. [parity.md](parity.md) is the full audit against Drive for
+  desktop, with how each row was established.
 - **A conflict that a person can act on.** Today a conflict is a message in the journal and a
   non-zero exit from the timer. Drive for desktop makes a conflict copy; the naming for that is
   already specified in [design.md](design.md) §9.

@@ -80,7 +80,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            debhelper devscripts lintian fakeroot fuse3 rclone
+            dpkg-dev debhelper lintian fakeroot fuse3 rclone
 
       - name: Build the package
         env:

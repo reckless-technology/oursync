@@ -52,8 +52,9 @@ READ_ONLY="${READ_ONLY:-auto}"
 # How long a closed file waits before it is uploaded. Long enough that an application saving
 # repeatedly spends one upload rather than five; short enough that a crash loses little.
 WRITE_BACK="${WRITE_BACK:-10s}"
-# rclone's own --bwlimit syntax, empty for no limit. Worth setting on a slow uplink: Drive has no
-# delta upload, so one save of a large file spends its whole size.
+# rclone's own --bwlimit syntax, empty for no limit. A single rate limits both directions; pairs
+# and timetables are rclone's, documented at rclone.org/docs/#bwlimit-bandwidth-spec. Worth setting
+# on a slow uplink: Drive has no delta upload, so one save of a large file spends its whole size.
 BWLIMIT="${BWLIMIT:-}"
 
 PROG=${0##*/}

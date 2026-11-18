@@ -19,7 +19,7 @@ HEADLINE=${HEADLINE:-"OurSync $VERSION"}
 DATE=$(date -R)
 
 command -v dpkg-buildpackage > /dev/null \
-    || { echo "dpkg-buildpackage is missing (apt install devscripts debhelper)" >&2; exit 1; }
+    || { echo "dpkg-buildpackage is missing (apt install dpkg-dev debhelper)" >&2; exit 1; }
 
 mkdir -p "$OUT"
 sed -e "s|@VERSION@|$VERSION|g" \

@@ -109,7 +109,8 @@ needing no root.
 
 ## What it does not do
 
-Said plainly, because these are limits rather than things left undone:
+[docs/parity.md](docs/parity.md) is the full feature-by-feature comparison with Drive for desktop,
+each row saying how it was established. The ones worth knowing before you install:
 
 - **No differential upload — Google's own client can do this and nothing else can.** Since October
   2024 Drive for desktop uploads only the changed parts of a large file, through something

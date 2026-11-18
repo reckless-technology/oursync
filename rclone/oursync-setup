@@ -24,7 +24,10 @@ UNION="${UNION:-drive-pinned}"
 MOUNT="${MOUNT:-$HOME/Drive}"
 PIN_DIR="${PIN_DIR:-$HOME/.local/share/oursync/pinned}"
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/oursync}"
-SCOPE=drive
+# Empty means "leave an existing remote's scope alone, and ask for drive when creating one". A
+# re-run of setup - which install.sh does every time - must not put a Google consent screen in
+# front of somebody who only reinstalled the scripts. Changing the scope is an explicit --scope.
+SCOPE=""
 CLIENT_SECRET=""
 FORCE_REAUTH=no
 
@@ -40,7 +43,10 @@ usage() {
     cat <<USAGE
 $PROG - create or re-authorise OurSync's per-user configuration
 
-  --scope drive|drive.readonly   what to ask Google for (default: drive, which can write)
+  --scope drive|drive.readonly   what to ask Google for. A new remote asks for drive, which
+                                 can write; an existing one keeps the scope it has unless
+                                 this says otherwise, so a re-run never springs a consent
+                                 screen on you
   --client-secret PATH           the OAuth client JSON downloaded from Google Cloud
                                  (default: $CONF_DIR/client_secret.json)
   --remote NAME                  name of the Drive remote (default: $REMOTE)
@@ -78,7 +84,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$SCOPE" in
-    drive|drive.readonly) ;;
+    ""|drive|drive.readonly) ;;
     *) die "--scope must be drive or drive.readonly, not '$SCOPE'" ;;
 esac
 
@@ -105,6 +111,16 @@ existing_type=$(rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^type = //p
 
 if [ -n "$existing_type" ] && [ "$existing_type" != drive ]; then
     die "an rclone remote called '$REMOTE' already exists and is not a Drive remote (type=$existing_type)"
+fi
+
+# Resolve what was left unsaid: an existing remote keeps the scope it has, and a new one asks for
+# read-write, which is what the product is for.
+if [ -z "$SCOPE" ]; then
+    if [ -n "$existing_type" ]; then
+        SCOPE="${existing_scope:-drive}"
+    else
+        SCOPE=drive
+    fi
 fi
 
 authorise_notes() {
@@ -220,8 +236,10 @@ READ_ONLY=auto
 # spends one upload rather than five.
 WRITE_BACK=10s
 
-# rclone's --bwlimit syntax, empty for no limit. Worth setting on a slow uplink: Drive has no
-# delta upload, so every save of a large file spends its whole size.
+# rclone's own --bwlimit syntax, empty for no limit. A single rate (2M) limits both directions;
+# rclone also takes a pair and a timetable, documented at rclone.org/docs/#bwlimit-bandwidth-spec.
+# Worth setting on a slow uplink: Drive has no delta upload, so every save of a large file spends
+# its whole size.
 BWLIMIT=
 
 # Control port, used to invalidate the mount's directory cache the moment a pin changes - without
