@@ -97,6 +97,22 @@ bugs would have read as "1.60 is too old" had it been run there first.
 
 ## Traps particular to this project
 
+- **Build the package on Mint, not only in CI.** Three faults showed up only there, because
+  lintian's idea of a valid distribution depends on its vendor: `lsb_release -cs` gives Mint's own
+  codename (`zena`), which lintian has never heard of; `unstable` is a Debian suite that lintian
+  rejects on an Ubuntu-derived system; and `/etc/os-release` is the portable answer, since Mint
+  carries `UBUNTU_CODENAME=noble` beside `VERSION_CODENAME=zena`. **Source it in a subshell** —
+  `/etc/os-release` sets `VERSION`, which otherwise replaced the version from the git tags with
+  "22.3 (Zena)".
+- **Do not depend on an Essential package.** `coreutils`, `sed` and `findutils` are always present,
+  and depending on one without a version is a lintian *error*, not a warning.
+- **`dpkg-buildpackage` runs `debian/rules clean` first**, so a clean target that removes the whole
+  of `build/` deletes the output directory the caller just made. It removes only `build/staged`.
+- **`dpkg-checkbuilddeps` wants `build-essential`** even though nothing here compiles: Debian policy
+  makes it an implicit build dependency. Install it rather than passing `-d`, which would skip every
+  build dependency check.
+- **Never run `lsof +D ~/Drive`.** It walks the whole mount, which means listing 5 TB of Drive: it
+  hangs, and it spends quota doing it. To find what has the mount open, read `/proc/*/fd` instead.
 - **A union upstream that is a local path takes no trailing colon.** The colon belongs on a remote
   *name* (`gdrive-own:`). `/path:nc` is a path with a modifier; `/path:` is a remote that does not
   exist, and the union silently carries on with one upstream.
