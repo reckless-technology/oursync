@@ -150,9 +150,15 @@ NOTES
     printf '  %s\n\n' "$CLIENT_SECRET"
     cat <<'NOTES'
 You will see an "unverified app" warning when you consent. That is expected: the app is yours and
-you have not paid Google to verify it. If Google starts demanding re-authorisation every seven
-days, set the publishing status to "In production" at console.cloud.google.com/auth/overview,
-which stops the test-mode refresh-token expiry. It needs no verification and no review.
+you have not paid Google to verify it.
+
+A new project starts in "Testing", where Google expires the refresh token after seven days - your
+mount stops authenticating about a week in. Set the publishing status to "In production" at
+console.cloud.google.com/auth/overview to stop that. It needs no verification and no review.
+
+One thing will block that: do not upload an App logo on the Branding page. Google requires an app
+carrying a logo to be submitted for verification unless it stays in "Testing", so the logo and the
+seven-day expiry come as a pair. Leave it blank.
 NOTES
 }
 

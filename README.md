@@ -79,6 +79,12 @@ So the wall is real, and the trade is a good one: your credential, your project,
 click through an "unverified app" warning when you consent, because the app is yours and you have
 not paid Google to verify it.
 
+Set that project's publishing status to **In production** once it works. A project left in
+Google's "Testing" status expires its refresh token after seven days, and the mount stops
+authenticating. Leave the consent screen's App logo blank while you are at it: Google requires an
+app carrying a logo to go through verification unless it stays in "Testing", so the logo and the
+seven-day expiry come as a pair.
+
 ## Install
 
 A `.deb` for each release is on the
