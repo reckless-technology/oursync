@@ -20,7 +20,9 @@ override_dh_auto_build:
 	for f in rclone/nemo/*.nemo_action.in rclone/oursync-mount.service.in 	         rclone/oursync-refresh.service.in rclone/oursync-refresh.timer.in; do 		sed -e 's|@BIN@|/usr/bin|g' $$f > $(STAGE)/`basename $$f .in`; 		chmod 644 $(STAGE)/`basename $$f .in`; 	done
 
 override_dh_auto_clean:
-	rm -rf build
+# Only what this file stages. dpkg-buildpackage runs `clean` before the build, so removing
+# the whole of build/ here would delete the output directory the caller had just made.
+	rm -rf $(STAGE)
 
 # There is no test suite to run at package build time; the shellcheck and the functional tests run
 # in CI, against each rclone version the package claims to support.

@@ -21,7 +21,6 @@ DATE=$(date -R)
 command -v dpkg-buildpackage > /dev/null \
     || { echo "dpkg-buildpackage is missing (apt install dpkg-dev debhelper build-essential)" >&2; exit 1; }
 
-mkdir -p "$OUT"
 sed -e "s|@VERSION@|$VERSION|g" \
     -e "s|@DISTRIBUTION@|$DISTRIBUTION|g" \
     -e "s|@HEADLINE@|$HEADLINE|g" \
@@ -30,6 +29,9 @@ sed -e "s|@VERSION@|$VERSION|g" \
 echo "debian/changelog: oursync ($VERSION) $DISTRIBUTION"
 
 dpkg-buildpackage -us -uc --build=binary
+
+# After the build, not before: dpkg-buildpackage runs debian/rules clean first.
+mkdir -p "$OUT"
 
 # The products are in the parent directory, which on a build machine is somebody else's workspace.
 moved=0
