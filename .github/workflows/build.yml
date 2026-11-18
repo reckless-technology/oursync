@@ -94,7 +94,7 @@ jobs:
           # A package nobody has reviewed is worth checking against Debian's own rules. Errors fail
           # the job; warnings are printed, because some of them are about things a package outside
           # the archive cannot satisfy.
-          lintian --fail-on error --no-tag-display-limit build/deb/*.changes || {
+          lintian --fail-on error --tag-display-limit 0 build/deb/*.changes || {
             echo "::error::lintian reported an error"; exit 1; }
       - name: Install it, use it, remove it
         run: |

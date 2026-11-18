@@ -14,7 +14,10 @@ ROOT=$(pwd)
 OUT="$ROOT/build/deb"
 
 VERSION=$(sh tools/version.sh)
-DISTRIBUTION=${DISTRIBUTION:-$( (lsb_release -cs 2>/dev/null) || echo unstable )}
+# Not lsb_release -cs: on Mint that answers with Mint's own codename (zena), which is not a
+# distribution lintian knows, and it fails the package with bad-distribution-in-changes-file.
+# This field only matters for an archive upload, so the neutral value is the right default.
+DISTRIBUTION=${DISTRIBUTION:-unstable}
 HEADLINE=${HEADLINE:-"OurSync $VERSION"}
 DATE=$(date -R)
 

@@ -88,7 +88,7 @@ jobs:
         run: tools/build-deb.sh
 
       - name: lintian
-        run: lintian --fail-on error --no-tag-display-limit build/deb/*.changes
+        run: lintian --fail-on error --tag-display-limit 0 build/deb/*.changes
 
       - name: Install it and exercise it
         run: |

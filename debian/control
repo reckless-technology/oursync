@@ -11,12 +11,13 @@ Rules-Requires-Root: no
 
 Package: oursync
 Architecture: all
+# coreutils, sed and findutils are deliberately absent: they are Essential packages, always
+# present, and lintian makes depending on one without a version an error. rclone's floor is the
+# measured one - tools/rclone-floor-test.sh passes on 1.60.1, which is what Ubuntu 24.04 and
+# Mint 22 ship. fuse3 is what provides fusermount3.
 Depends: ${misc:Depends},
          rclone (>= 1.60),
-         fuse3,
-         coreutils,
-         sed,
-         findutils
+         fuse3
 Recommends: nemo, libnotify-bin
 Description: Google Drive as a filesystem, with chosen files kept locally
  OurSync presents Google Drive as an ordinary directory tree, by default at
