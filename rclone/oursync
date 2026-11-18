@@ -1,21 +1,30 @@
 #!/bin/bash
-# OurSync - stream Google Drive, and keep chosen files on local disk.
+# OurSync - Google Drive as a filesystem on Linux: streamed by default, with chosen files kept on
+# local disk and synchronised both ways.
 #
-# Drive appears at ~/Drive. Nothing is downloaded until something reads it, and what is read is
-# cached and evicted as the cache fills. A file that must be fast is *pinned*: a real copy is placed
-# on local disk, and from then on reads are served from there and never evicted.
+# Drive appears at ~/Drive and is read-write. Nothing is downloaded until something reads it, and
+# what is read is cached and evicted as the cache fills. A file that must always be fast, or must
+# survive going offline, is *pinned*: a real copy is placed on local disk, served from there, and
+# never evicted.
 #
 # How the two layers fit together:
 #
 #   ~/Drive                     an rclone mount of the union remote
-#     └─ union                  two upstreams, consulted in order
-#          ├─ <pin dir>:nc      local disk. ":nc" so new files are never created here by accident -
-#          │                    a pin is placed by this script, deliberately, and nothing else.
-#          └─ gdrive-own:       Drive itself
+#     |- union                  two upstreams, consulted in order
+#          |- <pin dir>:nc      local disk. ":nc" so new files are never *created* here by
+#          |                    accident - a pin is placed by this script, deliberately, and a new
+#          |                    file written into the mount goes to Drive, where it belongs.
+#          |- gdrive-own:       Drive itself
 #
 # search_policy=epall makes a read take the first upstream, in configured order, where the path
 # exists - so a pinned file is served from disk. action_policy=epall makes a write to an existing
-# file apply to *every* upstream holding it, so a pinned file cannot silently diverge from Drive.
+# file apply to *every* upstream holding it, so editing a pinned file updates both copies and the
+# pin cannot silently diverge from Drive.
+#
+# That covers every change made *through the mount*. A change made to Drive somewhere else - the
+# web, a phone, another machine - reaches a streamed file within --poll-interval, but it cannot
+# reach a pinned file, because the union serves the local copy and never looks at the remote one.
+# "oursync refresh" closes that hole, and the timer runs it; cmd_refresh has the direction rule.
 #
 # The ":writeback" modifier is deliberately not used. It copies the whole file to local disk on
 # first read, which is caching everything - and the corpus this is for is larger than the disk.
@@ -25,18 +34,34 @@ CONF="${OURSYNC_CONF:-$HOME/.config/oursync/oursync.conf}"
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
 
+CONF_DIR=$(dirname -- "$CONF")
+
 REMOTE="${REMOTE:-gdrive-own}"
 UNION="${UNION:-drive-pinned}"
 MOUNT="${MOUNT:-$HOME/Drive}"
 PIN_DIR="${PIN_DIR:-$HOME/.local/share/oursync/pinned}"
+PIN_LIST="${PIN_LIST:-$CONF_DIR/pins}"
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/oursync}"
 CACHE_MAX_SIZE="${CACHE_MAX_SIZE:-20G}"
 CACHE_MAX_AGE="${CACHE_MAX_AGE:-72h}"
 RC_ADDR="${RC_ADDR:-127.0.0.1:5572}"
 RC_USER="${RC_USER:-oursync}"
 RC_PASS="${RC_PASS:-}"
+# auto: read-only exactly when the remote's own scope is read-only. yes/no override it.
+READ_ONLY="${READ_ONLY:-auto}"
+# How long a closed file waits before it is uploaded. Long enough that an application saving
+# repeatedly spends one upload rather than five; short enough that a crash loses little.
+WRITE_BACK="${WRITE_BACK:-10s}"
+# rclone's own --bwlimit syntax, empty for no limit. Worth setting on a slow uplink: Drive has no
+# delta upload, so one save of a large file spends its whole size.
+BWLIMIT="${BWLIMIT:-}"
 
 PROG=${0##*/}
+# Substituted at install or package time. Left as the placeholder when the script is run straight
+# out of a checkout, which is a fact worth reporting rather than hiding behind a made-up number.
+VERSION="@VERSION@"
+case "$VERSION" in *@*) VERSION="0.0.0 (from source)" ;; esac
+TAB=$(printf '\t')
 
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
@@ -55,6 +80,20 @@ rel_path() {
     printf '%s' "${abs#"$MOUNT"/}"
 }
 
+remote_scope() { rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^scope = //p'; }
+
+# The mount is read-only exactly when writing could not work anyway. Deriving that from the
+# remote's scope rather than hard-coding a flag means a read-only token gives an immediate EROFS
+# instead of an API refusal half-way through a save, and re-authorising for read-write needs no
+# edit here.
+is_read_only() {
+    case "$READ_ONLY" in
+        yes|true|1|on) return 0 ;;
+        no|false|0|off) return 1 ;;
+        *) case "$(remote_scope)" in *readonly*) return 0 ;; *) return 1 ;; esac ;;
+    esac
+}
+
 rc() {
     [ -n "$RC_PASS" ] || return 0
     # Same reasoning as in cmd_mount: keep the password off the command line, where ps would show
@@ -64,9 +103,9 @@ rc() {
         rclone rc --rc-addr "$RC_ADDR" "$@" > /dev/null 2>&1 || true
 }
 
-# After a pin or an unpin the mount still holds a file object bound to whichever upstream it
-# resolved to when it was listed, so without this the change is invisible until --dir-cache-time
-# expires. Forget the parent directory and the next open resolves again.
+# After a pin, an unpin or a refresh the mount still holds a file object bound to whichever
+# upstream it resolved to when it was listed, so without this the change is invisible until
+# --dir-cache-time expires. Forget the parent directory and the next open resolves again.
 forget() {
     local rel parent
     rel="$1"
@@ -77,25 +116,52 @@ forget() {
 
 human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || printf '%s bytes' "$1"; }
 
+# The pin list records what the user asked to keep, which is not the same as what is on disk: a
+# pinned *directory* must gain the files Drive gains, and only the list knows it was pinned as a
+# directory rather than as the files it happened to hold. It lives beside the configuration rather
+# than inside the pin directory, because anything inside that directory shows up in the mount.
+pins_read() { [ -r "$PIN_LIST" ] && cat -- "$PIN_LIST" || true; }
+
+pins_write() {
+    mkdir -p -- "$CONF_DIR"
+    cat > "$PIN_LIST.new"
+    mv -f -- "$PIN_LIST.new" "$PIN_LIST"
+}
+
+pins_add() {
+    local line
+    line=$(printf '%s\t%s' "$1" "$2")
+    { pins_read | grep -vxF -- "$line" || true; printf '%s\n' "$line"; } \
+        | LC_ALL=C sort -t"$TAB" -k2 | pins_write
+}
+
+pins_remove() {
+    pins_read | awk -F'\t' -v r="$1" '$2 != r' | pins_write
+}
+
 cmd_pin() {
     [ $# -gt 0 ] || die "usage: $PROG pin <path under $MOUNT> ..."
     mountpoint -q "$MOUNT" || die "$MOUNT is not mounted - run '$PROG mount' first"
-    local rel target
+    local rel target kind
     for p in "$@"; do
         rel=$(rel_path "$p") || exit 1
         target="$PIN_DIR/$rel"
-        if [ -e "$target" ]; then
-            note "already pinned: $rel"
-            continue
-        fi
         mkdir -p -- "$(dirname -- "$target")"
         # Copy from the remote directly rather than through the mount: the union would otherwise be
         # reading and writing the same logical path, and this way rclone verifies the transfer.
         if [ -d "$MOUNT/$rel" ]; then
+            kind=d
             rclone copy "$REMOTE:$rel" "$target" --progress --log-level ERROR || die "pin failed: $rel"
         else
+            kind=f
+            if [ -e "$target" ]; then
+                pins_add f "$rel"
+                note "already pinned: $rel"
+                continue
+            fi
             rclone copyto "$REMOTE:$rel" "$target" --progress --log-level ERROR || die "pin failed: $rel"
         fi
+        pins_add "$kind" "$rel"
         forget "$rel"
         note "pinned: $rel"
     done
@@ -114,6 +180,7 @@ cmd_unpin() {
             *) die "refusing to remove something outside $PIN_DIR: $canonical" ;;
         esac
         if [ ! -e "$canonical" ]; then
+            pins_remove "$rel"
             note "not pinned: $rel"
             continue
         fi
@@ -123,23 +190,147 @@ cmd_unpin() {
         fi
         rm -rf -- "$canonical"
         find "$PIN_DIR" -mindepth 1 -type d -empty -delete 2>/dev/null
+        pins_remove "$rel"
         forget "$rel"
         note "unpinned: $rel"
     done
 }
 
+# Drive's own modification time for one path, as seconds since the epoch; fails if it is not there.
+#
+# Note what this is not used for: nothing here resolves anything by "newest wins" across different
+# files. This Drive holds files whose modifiedTime is years in the future, because Drive stores
+# whatever time an upload supplies, and a copy preserves that time on both sides - so the
+# comparison below is between two copies of one file, which agree, rather than between two files.
+remote_mtime() {
+    local iso
+    iso=$(rclone lsjson "$REMOTE:$1" --log-level ERROR 2>/dev/null \
+        | sed -n 's/.*"ModTime":"\([^"]*\)".*/\1/p' | head -1)
+    [ -n "$iso" ] || return 1
+    date -d "$iso" +%s 2>/dev/null
+}
+
+# Bring pinned copies back into agreement with Drive.
+#
+# A pin is a cache of Drive, not a second replica, so Drive is the truth and a pinned file whose
+# Drive copy has changed is re-copied. The reverse should not arise: a write through the mount
+# reaches both upstreams, so the local copy cannot get ahead by ordinary use. If it has - the mount
+# was bypassed, or a write reached disk and not Drive - that is a conflict, and a conflict is
+# reported rather than resolved, because overwriting it could destroy the only copy of something.
+cmd_refresh() {
+    local quiet=no
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -q|--quiet) quiet=yes; shift ;;
+            --) shift; break ;;
+            -*) die "unknown option for refresh: $1" ;;
+            *) break ;;
+        esac
+    done
+
+    local -a entries=()
+    local rel
+    if [ $# -gt 0 ]; then
+        for p in "$@"; do
+            rel=$(rel_path "$p") || exit 1
+            if [ -d "$PIN_DIR/$rel" ]; then
+                entries+=("$(printf 'd\t%s' "$rel")")
+            else
+                entries+=("$(printf 'f\t%s' "$rel")")
+            fi
+        done
+    else
+        mapfile -t entries < <(pins_read)
+    fi
+
+    if [ "${#entries[@]}" -eq 0 ]; then
+        [ "$quiet" = yes ] || note "nothing pinned"
+        return 0
+    fi
+
+    local entry kind target rmt lcl
+    local checked=0 pulled=0 conflicts=0 gone=0
+    for entry in "${entries[@]}"; do
+        [ -n "$entry" ] || continue
+        IFS="$TAB" read -r kind rel <<< "$entry"
+        [ -n "${rel:-}" ] || continue
+        target="$PIN_DIR/$rel"
+        checked=$((checked + 1))
+
+        # A pinned directory tracks Drive wholesale: --update takes the files Drive has newer or
+        # does not have locally, and leaves a locally-newer file alone rather than overwriting it.
+        if [ "$kind" = d ]; then
+            if rclone copy "$REMOTE:$rel" "$target" --update --log-level ERROR 2>/dev/null; then
+                forget "$rel"
+            else
+                note "refresh: could not read $rel from $REMOTE"
+            fi
+            continue
+        fi
+
+        # Pinned, but no longer on disk: fetch it again if Drive still has it, otherwise the pin is
+        # stale in both places and the list entry goes.
+        if [ ! -e "$target" ]; then
+            if remote_mtime "$rel" > /dev/null; then
+                mkdir -p -- "$(dirname -- "$target")"
+                if rclone copyto "$REMOTE:$rel" "$target" --log-level ERROR 2>/dev/null; then
+                    pulled=$((pulled + 1))
+                    forget "$rel"
+                else
+                    note "refresh: could not fetch $rel"
+                fi
+            else
+                pins_remove "$rel"
+                gone=$((gone + 1))
+            fi
+            continue
+        fi
+
+        if ! rmt=$(remote_mtime "$rel"); then
+            note "refresh: $rel is pinned but no longer in $REMOTE - the local copy is the only one"
+            gone=$((gone + 1))
+            continue
+        fi
+        lcl=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)
+
+        # Equal times mean equal content here: both sides took their time from the same copy.
+        [ "$rmt" -eq "$lcl" ] && continue
+
+        if [ "$rmt" -gt "$lcl" ]; then
+            if rclone copyto "$REMOTE:$rel" "$target" --log-level ERROR 2>/dev/null; then
+                pulled=$((pulled + 1))
+                forget "$rel"
+                [ "$quiet" = yes ] || note "updated from Drive: $rel"
+            else
+                note "refresh: could not update $rel from $REMOTE"
+            fi
+        else
+            conflicts=$((conflicts + 1))
+            note "CONFLICT: $rel is newer on disk ($(date -d "@$lcl" '+%F %T')) than in Drive ($(date -d "@$rmt" '+%F %T'))"
+            note "          nothing was overwritten. Take the copy you want from $target, then re-pin."
+        fi
+    done
+
+    if [ "$quiet" = no ] || [ "$conflicts" -gt 0 ]; then
+        printf '%s checked, %s updated from Drive, %s conflict(s), %s no longer in Drive\n' \
+            "$checked" "$pulled" "$conflicts" "$gone"
+    fi
+    [ "$conflicts" -eq 0 ]
+}
+
 cmd_list() {
+    local n total listed
+    listed=$(pins_read | grep -c . || true)
     [ -d "$PIN_DIR" ] || { note "nothing pinned"; return 0; }
-    local n total
     n=$(find "$PIN_DIR" -type f 2>/dev/null | wc -l)
     if [ "$n" -eq 0 ]; then note "nothing pinned"; return 0; fi
     total=$(du -sb "$PIN_DIR" 2>/dev/null | cut -f1)
     find "$PIN_DIR" -type f -printf '%s\t%P\n' 2>/dev/null \
         | sort -rn \
-        | while IFS=$'\t' read -r sz rel; do
+        | while IFS="$TAB" read -r sz rel; do
               printf '%10s  %s\n' "$(human "$sz")" "$rel"
           done
-    printf '\n%s pinned, %s on disk\n' "$n" "$(human "${total:-0}")"
+    printf '\n%s file(s) on disk, from %s pin(s), %s\n' "$n" "$listed" "$(human "${total:-0}")"
 }
 
 cmd_status() {
@@ -162,71 +353,123 @@ cmd_mount() {
     # any flag as RCLONE_<FLAG>, and a command line is world-readable through ps and /proc/*/cmdline
     # while /proc/*/environ is readable only by the owner - so passing --rc-pass would publish the
     # password to every account on the machine.
-    local rcflags=()
     if [ -n "$RC_PASS" ]; then
         export RCLONE_RC=true RCLONE_RC_ADDR="$RC_ADDR" RCLONE_RC_USER="$RC_USER" RCLONE_RC_PASS="$RC_PASS"
     fi
-    # --read-only because the configured Drive remote holds the drive.readonly scope. Without it a
-    # write fails late and confusingly, part-way through a save; with it the filesystem says so at
-    # once. Remove this flag only together with re-authorising the remote for read-write.
-    rclone mount "$UNION:" "$MOUNT" \
-        --read-only \
-        --vfs-cache-mode full \
-        --cache-dir "$CACHE_DIR" \
-        --vfs-cache-max-size "$CACHE_MAX_SIZE" \
-        --vfs-cache-max-age "$CACHE_MAX_AGE" \
-        --vfs-read-chunk-size 64M \
-        --vfs-read-chunk-size-limit 2G \
-        --dir-cache-time 5m \
-        --poll-interval 1m \
-        --umask 022 \
-        "${rcflags[@]}" \
-        "$@"
+
+    local -a flags=(
+        --vfs-cache-mode full
+        --cache-dir "$CACHE_DIR"
+        --vfs-cache-max-size "$CACHE_MAX_SIZE"
+        --vfs-cache-max-age "$CACHE_MAX_AGE"
+        --vfs-read-chunk-size 64M
+        --vfs-read-chunk-size-limit 2G
+        --dir-cache-time 5m
+        --poll-interval 1m
+        --umask 022
+    )
+    if is_read_only; then
+        flags+=(--read-only)
+        note "$MOUNT will be read-only: $REMOTE has scope '$(remote_scope)'."
+        note "Run '$PROG setup --scope drive' to re-authorise it for writing."
+    else
+        flags+=(--vfs-write-back "$WRITE_BACK")
+    fi
+    [ -n "$BWLIMIT" ] && flags+=(--bwlimit "$BWLIMIT")
+
+    rclone mount "$UNION:" "$MOUNT" "${flags[@]}" "$@"
 }
 
 cmd_unmount() {
-    fusermount -u "$MOUNT" 2>/dev/null || fusermount3 -u "$MOUNT" 2>/dev/null \
+    mountpoint -q "$MOUNT" || { note "$MOUNT is not mounted"; return 0; }
+    fusermount3 -u "$MOUNT" 2>/dev/null || fusermount -u "$MOUNT" 2>/dev/null \
         || die "could not unmount $MOUNT"
     note "unmounted $MOUNT"
 }
 
 cmd_doctor() {
+    local scope mode problems=0
+    scope=$(remote_scope)
+    if is_read_only; then mode="READ-ONLY"; else mode="read-write"; fi
+    printf 'oursync      %s\n' "$VERSION"
+    printf 'rclone       %s\n' "$(rclone version 2>/dev/null | head -1 | sed 's/^rclone //')"
     printf 'config       %s%s\n' "$CONF" "$([ -r "$CONF" ] || printf ' (missing, using defaults)')"
-    printf 'remote       %s  scope=%s\n' "$REMOTE" \
-        "$(rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^scope = //p')"
+    printf 'remote       %s  scope=%s\n' "$REMOTE" "${scope:-unknown}"
     printf 'union        %s  upstreams=%s\n' "$UNION" \
         "$(rclone config show "$UNION" 2>/dev/null | sed -n 's/^upstreams = //p')"
-    printf 'mount        %s  %s\n' "$MOUNT" \
-        "$(mountpoint -q "$MOUNT" && echo mounted || echo 'NOT MOUNTED')"
+    printf 'mount        %s  %s, %s\n' "$MOUNT" \
+        "$(mountpoint -q "$MOUNT" && echo mounted || echo 'NOT MOUNTED')" "$mode"
+    printf 'pins         %s listed in %s\n' "$(pins_read | grep -c . || true)" "$PIN_LIST"
     printf 'pin dir      %s  %s files, %s\n' "$PIN_DIR" \
         "$(find "$PIN_DIR" -type f 2>/dev/null | wc -l)" \
         "$(human "$(du -sb "$PIN_DIR" 2>/dev/null | cut -f1 || echo 0)")"
     printf 'cache        %s  %s (limit %s)\n' "$CACHE_DIR" \
         "$(human "$(du -sb "$CACHE_DIR" 2>/dev/null | cut -f1 || echo 0)")" "$CACHE_MAX_SIZE"
+    printf 'write-back   %s%s\n' "$WRITE_BACK" \
+        "$([ -n "$BWLIMIT" ] && printf ', bwlimit %s' "$BWLIMIT")"
     printf 'control      %s\n' \
-        "$([ -n "$RC_PASS" ] && echo "$RC_ADDR" || echo 'disabled - pins need up to --dir-cache-time to show')"
+        "$([ -n "$RC_PASS" ] && echo "$RC_ADDR" || echo 'disabled - a new pin waits for --dir-cache-time')"
+    printf 'refresh      %s\n' \
+        "$(systemctl --user is-active oursync-refresh.timer 2>/dev/null || echo 'timer not running')"
     printf 'disk         %s\n' "$(df -h "$PIN_DIR" 2>/dev/null | tail -1)"
+
+    command -v rclone > /dev/null || { note "PROBLEM: rclone is not installed"; problems=1; }
+    if [ -z "$scope" ]; then
+        note "PROBLEM: no rclone remote called '$REMOTE' - run '$PROG setup'"
+        problems=1
+    fi
+    case "$scope" in
+        *readonly*) note "NOTE: $REMOTE is read-only, so $MOUNT cannot be written to."
+                    note "      '$PROG setup --scope drive' re-authorises it for writing." ;;
+    esac
+    if ! mountpoint -q "$MOUNT"; then
+        note "PROBLEM: $MOUNT is not mounted - 'systemctl --user start oursync-mount.service'"
+        problems=1
+    fi
+    [ -n "$RC_PASS" ] || note "NOTE: no control password in $CONF, so a new pin can take 5 minutes to appear"
+    [ "$problems" -eq 0 ] && note "no problems found"
+    return 0
 }
 
 case "${1:-}" in
     pin)      shift; cmd_pin "$@" ;;
     unpin)    shift; cmd_unpin "$@" ;;
+    refresh)  shift; cmd_refresh "$@" ;;
     list|ls)  shift; cmd_list "$@" ;;
     status)   shift; cmd_status "$@" ;;
     mount)    shift; cmd_mount "$@" ;;
     unmount|umount) shift; cmd_unmount "$@" ;;
     doctor)   shift; cmd_doctor "$@" ;;
-    *)
-        cat >&2 <<USAGE
-$PROG - stream Google Drive at $MOUNT, with chosen files kept on local disk
+    # The sibling first, so a copy run straight out of a checkout uses its own setup rather than
+    # whichever one happens to be on PATH.
+    setup)
+        shift
+        here=$(dirname -- "$(readlink -f -- "$0")")
+        if [ -x "$here/oursync-setup" ]; then exec "$here/oursync-setup" "$@"; fi
+        command -v oursync-setup > /dev/null || die "oursync-setup is not installed"
+        exec oursync-setup "$@" ;;
+    version|--version|-V) printf '%s %s\n' "$PROG" "$VERSION" ;;
+    help|--help|-h|"")
+        cat <<USAGE
+$PROG - Google Drive as a filesystem: streamed at $MOUNT, with chosen files kept on local disk
 
   $PROG pin <path>...      keep a real copy on disk; reads never touch the network again
   $PROG unpin <path>...    remove the local copy; the file goes back to streaming
+  $PROG refresh [path]...  bring pinned copies back into agreement with Drive
   $PROG list               what is pinned, and what it costs on disk
   $PROG status <path>...   pinned or streamed
   $PROG mount [flags]      mount Drive at $MOUNT (runs in the foreground)
   $PROG unmount            unmount it
-  $PROG doctor             show the whole configuration and its current state
+  $PROG setup [--scope S]  create or re-authorise the per-user configuration
+  $PROG doctor             the whole configuration, its state, and anything wrong with it
+  $PROG version
+
+Changes made through $MOUNT reach Drive by themselves. Changes made to Drive elsewhere reach a
+streamed file within a minute, and a pinned file whenever '$PROG refresh' runs - every 5 minutes
+if oursync-refresh.timer is enabled.
 USAGE
+        ;;
+    *)
+        printf '%s: unknown command "%s" - try "%s help"\n' "$PROG" "$1" "$PROG" >&2
         exit 2 ;;
 esac

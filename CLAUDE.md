@@ -6,12 +6,11 @@ is specific to OurSync.
 
 ## What this is
 
-Google Drive streamed at `~/Drive` on Linux Mint, with chosen files kept on local disk. It is
-**shell scripts over `rclone`**, in [`rclone/`](rclone/), and that is the whole product. It is
-installed and working on `jonny-precision`.
+Google Drive as a filesystem on Linux Mint: streamed at `~/Drive`, synchronised both ways, with
+chosen files kept on local disk. It is **shell scripts over `rclone`**, in [`rclone/`](rclone/),
+packaged from [`debian/`](debian/), and that is the whole product. GPLv3, public repository.
 
-Read [`rclone/README.md`](rclone/README.md) first. The next piece of work is a `.deb` so it can be
-shared — [docs/plan.md](docs/plan.md).
+Read [`rclone/README.md`](rclone/README.md) and [docs/plan.md](docs/plan.md) first.
 
 ## It was going to be a Go daemon, and measurement killed that
 
@@ -26,10 +25,16 @@ and `rclone mount` keeps up at 62.3. Jonny's acceptance bar is 60.
 the runs that were void and why. Read it before proposing anything that assumes throughput is a
 problem here.
 
+**What that retired was the daemon's architecture, not the product's scope.** The brief is a Drive
+for desktop equivalent: streaming by default, chosen files mirrored, two-way sync. A read-only
+`drive.readonly` token was authorised for the benchmarking work, and for a while that benchmarking
+decision was allowed to harden into the product and get written up in the README as a *limitation*.
+It was not a limitation; it was scope dropped without asking. Do not narrow the brief to whatever
+the current configuration happens to permit.
+
 **The design document is kept as research, not as a plan.** Its survey of the Drive API — the quota
-arithmetic, the name mapping, the failure modes, the absence of delta upload — is sound and still
-answers questions. Its architecture is history. The Go foundation under `internal/` is unused;
-removing it is a decision not yet taken.
+arithmetic, the name mapping, the failure modes, the absence of delta upload, the conflict naming —
+is sound and still answers questions. Its architecture is history.
 
 ## Decisions not to reopen without reading why
 
@@ -48,53 +53,76 @@ removing it is a decision not yet taken.
 - **`:writeback` is not used.** It copies the whole file to local disk on first read, which is
   caching everything — and the corpus is larger than the disk. It looks like exactly the right flag
   and is exactly the wrong one.
-- **`:nc` on the local upstream.** Nothing is ever *created* on the local side by accident; a pin is
-  placed deliberately and nothing else writes there.
-- **The mount is `--read-only`**, because the remote holds the `drive.readonly` scope. A write
-  otherwise fails late and confusingly, part-way through a save. Removing the flag means
-  re-authorising the remote for read-write, which is Jonny's decision and not yet made.
+- **`:nc` on the local upstream.** It is not only about accidents: it is what makes a file created
+  in the mount land in Drive rather than on local disk, since the local upstream is excluded from
+  the CREATE category entirely.
+- **A pin is a cache of Drive, not a replica.** That is what settles the sync direction: Drive wins,
+  `oursync refresh` pulls, and a locally-newer differing copy is a *conflict* that is reported and
+  never overwritten. Anything that resolves a conflict silently is wrong here.
+- **The mount's read-only flag is derived from the remote's scope, not hard-coded.** A read-only
+  token with a writable mount fails part-way through a save; the derivation makes it fail at once.
 - **Credentials never go on a command line.** `--rc-pass` published the mount control password to
   every account on the machine through `ps` and `/proc/*/cmdline`; it goes through `RCLONE_RC_PASS`
   instead, which `/proc/*/environ` restricts to the owner.
+- **The Go foundation is gone**, deleted when the repository went public. Its `Makefile` built
+  `./cmd/oursyncd`, which never existed.
 
 ## Working on it
 
-Shell, so `shellcheck` and plain POSIX-ish bash. There is no build.
-
-Install or re-install on a machine:
+Shell, so `shellcheck -S style` and plain POSIX-ish bash. There is no compile step.
 
 ```sh
-./rclone/install.sh
-systemctl --user enable --now oursync-mount.service
-oursync doctor
+./rclone/install.sh                 # per-user install from a checkout, then runs oursync setup
+tools/rclone-floor-test.sh          # does this rclone do everything OurSync asks? (no network)
+tools/build-deb.sh                  # the package, into build/deb/
 ```
 
 **It cannot be tested on Windows.** It needs `/dev/fuse` and a real mount. Test on
 `jonny-precision` (`ssh -4 jonny@jonny-precision.local`, Mint 22.3, kernel 7.0.0-42). It is Jonny's
 own laptop with his session live: work in a directory of your own, change no system settings, and
-clean up.
+clean up. His own installation is live there — `~/Drive` is mounted and
+`oursync-mount.service` is running — so never reconfigure it as a side effect of a test.
+`tools/rclone-floor-test.sh` sets its own `RCLONE_CONFIG`, which is why it is safe to run there.
 
 **A pin test that does not mark the local copy proves nothing.** The VFS cache will serve a
 previously-read file at local-disk speed whether or not it is pinned, and the bytes are identical,
 so both timing and checksums agree with either answer. Use a file never read through the mount,
 append a marker to the local copy, invalidate, and compare. This was got wrong once already.
 
+**Run a new checker where the answer is already known.** The floor test failed six of fourteen
+checks against rclone 1.76 — a version known to work — because its fixture gave a local directory
+upstream a trailing colon (`/tmp/x/cloud:`), which resolves to nothing and leaves a silent
+one-upstream union, and because it grepped for `"forgot"` where rclone answers `"forgotten"`. Both
+bugs would have read as "1.60 is too old" had it been run there first.
+
 ## Traps particular to this project
 
-- **apt ships rclone 1.60.1** on Ubuntu 24.04, which Mint 22.3 is built on. Development and all
-  testing happened on **1.76.0**, installed by hand into `/usr/local/bin`. Nothing is tested against
-  1.60.1, so `Depends: rclone` in a package would be a guess. See the dependency section of
-  [docs/plan.md](docs/plan.md).
+- **A union upstream that is a local path takes no trailing colon.** The colon belongs on a remote
+  *name* (`gdrive-own:`). `/path:nc` is a path with a modifier; `/path:` is a remote that does not
+  exist, and the union silently carries on with one upstream.
+- **A scope change needs a new token.** Google binds the scope to the token, so editing
+  `scope = drive` in the configuration changes nothing by itself. `oursync setup` does it in two
+  steps for a reason: `rclone config update ... config_refresh_token=false --non-interactive`
+  changes only the configuration, so a failure leaves a working remote, and then
+  `rclone config reconnect` replaces the token. Verified on rclone 1.60.1 and 1.76.0.
+- **rclone's OAuth consent wants a browser on the same machine.** Over ssh, answer Y anyway and
+  tunnel the port: `ssh -L 53682:localhost:53682 user@host`. Answering N works too and prints what
+  to run elsewhere.
+- **Google-native documents have no hash and report `Size: -1`.** Anything comparing copies must
+  cope with a missing hash rather than treating it as a difference.
 - **`modifiedTime` can be in the future, and is in this Drive.** Seven 1 GiB DVD `.VOB` files
   created in July 2026 report `2036-02-07T01:58:15.000Z` — ten years ahead, read straight from the
   API, because Drive stores whatever `modifiedTime` an upload supplies and that rip carried the
-  disc's own. Anything assuming `modifiedTime <= now`, resolving conflicts by "newest wins", or
-  validating a cache entry by comparing timestamps will be wrong about these files for a decade.
+  disc's own. Anything assuming `modifiedTime <= now` or resolving conflicts by "newest wins" will
+  be wrong about these files for a decade. `oursync refresh` compares two copies of *one* file,
+  which both carry the same odd time, so it is unaffected — that is why the comparison is written
+  that way rather than against the clock.
 - **A 403 is not one error.** `rateLimitExceeded` and `userRateLimitExceeded` are retryable;
   `storageQuotaExceeded` is terminal; `downloadQuotaExceeded` is undocumented, real, and per-file.
   The reason must be parsed from the body; the status code does not distinguish them.
 - **Quota is metered in units, not requests**: 325,000 per user per minute, a download costing 200
-  and a list 100. Small, frequent reads are disproportionately expensive.
+  and a list 100. Small, frequent reads are disproportionately expensive, which is why the refresh
+  timer runs every five minutes rather than every thirty seconds.
 - **`prompt=consent` is required as well as `access_type=offline`.** Without it, a second
   authorisation of the same client returns no refresh token at all. This has already cost time on
   the YouTube project in this workspace.
@@ -106,12 +134,11 @@ append a marker to the local copy, invalidate, and compare. This was got wrong o
   and answers `403`, then `429`, with a one-byte body; divided by a near-zero time that reported
   416 MB/s on a 511 Mbit link. Every timed transfer asserts the bytes it received.
 
-## Jonny's open decisions
+## CI and releases
 
-Named in [docs/plan.md](docs/plan.md), and none of them is an engineering question:
-
-1. **The licence**, since the README still says proprietary and not for distribution.
-2. **Repository visibility**, currently private.
-3. **Whether writes are enabled**, which means re-authorising Drive with the full `drive` scope.
-4. **Whether the Google onboarding wall is acceptable** for the people he wants to share this with
-   — each needs their own Cloud project, and it cannot be removed.
+The repository is public, so every job runs on a **GitHub-hosted** image and none of this competes
+for the organisation's self-hosted machines. `build.yml` is shellcheck, the package (built,
+lintian'd, installed, exercised, removed) and the rclone floor test against both the version apt
+ships and the current one. `release.yml` follows the house pattern: a tag `vMAJOR.MINOR` or a
+dispatch builds `MAJOR.MINOR.BUILD` from `tools/version.sh` and leaves a **draft** release with the
+`.deb` and its checksum. Publishing it is Jonny's step, as everywhere else in the organisation.

@@ -1,0 +1,151 @@
+name: release
+
+# One release of OurSync, left a private draft.
+#
+# Push a tag vMAJOR.MINOR (v1.0) and the .deb is built from nothing, installed, exercised and
+# attached to a draft GitHub release vMAJOR.MINOR.0 with its checksum. Run it by hand
+# (workflow_dispatch) and the same happens at the head of main, as vMAJOR.MINOR.BUILD where BUILD
+# is the number of commits since the nearest vMAJOR.MINOR tag - the version the package and the
+# script both report, from tools/version.sh. A dry run builds and tests exactly as a release does,
+# on any branch, and makes no draft: its files are kept as the run's artifacts.
+#
+# The release stays a draft. Nothing here publishes it, pushes a tag or announces anything:
+# publishing is a human step, taken after looking at what the draft holds. This mirrors how the
+# rest of the organisation's products are released.
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and test only; make no draft"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write       # create the draft release and upload its files
+
+# A tag push and a dispatch at once would each open and replace drafts under the other, so one at
+# a time, and a run waits rather than cancelling one that could be half-way through an upload.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, test and draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0        # version.sh reads the tags
+
+      - name: Which version, and is this allowed to make a draft?
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = tag ]; then
+            if ! echo "$GITHUB_REF_NAME" | grep -qE '^v[0-9]+\.[0-9]+$'; then
+              echo "::error::Tag $GITHUB_REF_NAME is not vMAJOR.MINOR. Version marks have two components."
+              exit 1
+            fi
+          fi
+          dry_run=false
+          if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.dry_run }}" = true ]; then
+            dry_run=true
+          fi
+          # Releases are cut from main and nowhere else. A dry run, which makes no draft, may run
+          # anywhere.
+          if [ "$dry_run" = false ]; then
+            git fetch --no-tags origin main:refs/remotes/origin/main
+            if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+              echo "::error::$GITHUB_SHA is not on main, so it cannot be released."
+              exit 1
+            fi
+          fi
+          version=$(tools/version.sh)
+          if [ "$version" = 0.0.0 ] && [ "$dry_run" = false ]; then
+            echo "::error::no vMAJOR.MINOR tag is reachable, so there is no version to release."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+          echo "OurSync $version (dry run: $dry_run)"
+
+      - name: Install the packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            debhelper devscripts lintian fakeroot fuse3 rclone
+
+      - name: Build the package
+        env:
+          HEADLINE: "OurSync ${{ steps.version.outputs.version }}"
+        run: tools/build-deb.sh
+
+      - name: lintian
+        run: lintian --fail-on error --no-tag-display-limit build/deb/*.changes
+
+      - name: Install it and exercise it
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y "./$(echo build/deb/oursync_*_all.deb)"
+          oursync version
+          test "$(oursync version)" = "oursync ${{ steps.version.outputs.version }}"
+          oursync doctor
+          man --where oursync
+          # The same functional test CI runs on every push, against the rclone this image has, so
+          # nothing is released that the installed rclone cannot actually drive.
+          tools/rclone-floor-test.sh
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd build/deb
+          sha256sum ./*.deb > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oursync-${{ steps.version.outputs.version }}
+          path: build/deb/*
+          retention-days: 14
+
+      - name: Leave a draft release
+        if: steps.version.outputs.dry_run == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A published release of this version stops the run rather than being touched; an earlier
+          # draft of it is replaced, so a re-run is safe.
+          state=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo absent)
+          if [ "$state" = false ]; then
+            echo "::error::$TAG is already published. Bump the tag rather than overwriting a release."
+            exit 1
+          fi
+          [ "$state" = true ] && gh release delete "$TAG" --yes
+          gh release create "$TAG" \
+            --draft \
+            --title "OurSync $VERSION" \
+            --notes "Install on Linux Mint 22 / Ubuntu 24.04 or newer:
+
+    sudo apt install ./oursync_${VERSION}_all.deb
+    oursync setup
+    systemctl --user enable --now oursync-mount.service
+    systemctl --user enable --now oursync-refresh.timer
+
+Needs rclone 1.60 or newer, which is what apt ships; every feature OurSync uses is tested against
+that version in CI.
+
+\`oursync setup\` walks the one-time Google Cloud step. OurSync ships no OAuth client ID, because
+an application distributing its own with Google's restricted drive scope needs OAuth verification
+and an annually renewed third-party security assessment." \
+            build/deb/*.deb build/deb/SHA256SUMS
+          gh release view "$TAG"

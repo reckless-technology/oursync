@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Measure what GNOME's own Google Drive integration (gnome-online-accounts + the gvfsd-google
 # GVfs backend) can actually do, on this machine, against this Drive.
 #
@@ -32,6 +32,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 say "environment"
 uname -r
+# shellcheck source=/dev/null
 . /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"
 dpkg -l gvfs-backends gnome-online-accounts 2>/dev/null | awk '/^ii/ {print $2, $3}'
 
@@ -59,7 +60,13 @@ fi
 echo "mount: $MOUNT"
 
 say "top-level listing, and how long it takes"
-time ls -la "$MOUNT" 2>&1 | head -40
+# ls, not find: how the backend presents entries is the thing being looked at, and `time` on
+# a pipeline measures nothing, so the timing goes round the listing alone.
+# shellcheck disable=SC2012
+# bash, not sh, because `time` here times whole pipelines: as a bash keyword it does, while
+# in dash there is no such keyword and the timing would be lost.
+# shellcheck disable=SC2176
+{ time ls -la "$MOUNT" ; } 2>&1 | head -40
 
 say "how a Google-native document is presented (name, size, type)"
 find "$MOUNT" -maxdepth 2 \( -name '*.gdoc' -o -name '*.gsheet' -o -name '*.docx' \) 2>/dev/null | head -5 | while read -r f; do
@@ -68,9 +75,11 @@ find "$MOUNT" -maxdepth 2 \( -name '*.gdoc' -o -name '*.gsheet' -o -name '*.docx
 done
 
 say "duplicate names in one folder - does the backend disambiguate or hide one"
+# shellcheck disable=SC2012
 ls -1 "$MOUNT" 2>/dev/null | sort | uniq -d | head -10 || echo "(no duplicates at the top level, or listing failed)"
 
 say "stat cost of a deep listing (1000 entries, timed)"
+# shellcheck disable=SC2176
 time find "$MOUNT" -maxdepth 3 2>/dev/null | head -1000 | wc -l
 
 # Pick a large file to measure against, unless one was named.
@@ -94,14 +103,17 @@ dd if="$BIG" of=/dev/null bs=1M count=200 2>&1 | tail -2
 
 say "SEEKING: read 1 MB from 50% into the file. If this takes as long as reading to that point,"
 say "there is no random access and the backend is streaming from the start."
+# shellcheck disable=SC2176
 time dd if="$BIG" of=/dev/null bs=1M count=1 skip=$(( $(stat -c %s "$BIG") / 2097152 )) 2>&1 | tail -2
 
 say "small partial read far into the file (4 KiB at 90%)"
-time dd if="$BIG" of=/dev/null bs=4k count=1 skip=$(( $(stat -c %s "$BIG") / 4096 * 9 / 10 )) 2>&1 | tail -2
+# shellcheck disable=SC2176
+time dd if="$BIG" of=/dev/null bs=4k count=1 skip=$(( $(stat -c %s "$BIG") * 9 / 10 / 4096 )) 2>&1 | tail -2
 
 say "non-GIO applications"
 if have ffprobe; then
     echo "-- ffprobe (seeks, reads headers and the moov atom):"
+    # shellcheck disable=SC2176
     time ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$BIG" 2>&1 | head -5
 else
     echo "ffprobe not installed"

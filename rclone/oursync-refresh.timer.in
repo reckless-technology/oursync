@@ -1,0 +1,16 @@
+[Unit]
+Description=OurSync - refresh pinned files every few minutes
+Documentation=https://github.com/reckless-technology/oursync
+
+[Timer]
+# A streamed file picks up a remote change within --poll-interval on its own. A pinned file cannot,
+# because the union serves the local copy without asking Drive, so this is the only thing that
+# keeps one current. Five minutes is a list call per pinned file - 100 units of quota each against
+# a budget of 325,000 a minute - so the cost is nothing and the window is short.
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

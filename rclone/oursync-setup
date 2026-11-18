@@ -1,0 +1,251 @@
+#!/bin/bash
+# OurSync, the per-user half of the installation: the Drive remote, the union over it, the pin
+# directory and the configuration file.
+#
+# This is separate from the package because none of it can be done at install time. A .deb installs
+# once for the machine; a Drive remote, an OAuth token and a cache directory belong to a person, and
+# on a shared machine each of them needs their own. So the package places the files and this is run
+# once by each user.
+#
+# It is safe to re-run. It will not overwrite a configuration file that already exists, because
+# that holds the generated control-port password, and it will not re-authorise a remote that
+# already has the scope asked for.
+set -u
+
+PROG=${0##*/}
+VERSION="@VERSION@"
+case "$VERSION" in *@*) VERSION="0.0.0 (from source)" ;; esac
+
+CONF="${OURSYNC_CONF:-$HOME/.config/oursync/oursync.conf}"
+CONF_DIR=$(dirname -- "$CONF")
+
+REMOTE="${REMOTE:-gdrive-own}"
+UNION="${UNION:-drive-pinned}"
+MOUNT="${MOUNT:-$HOME/Drive}"
+PIN_DIR="${PIN_DIR:-$HOME/.local/share/oursync/pinned}"
+CACHE_DIR="${CACHE_DIR:-$HOME/.cache/oursync}"
+SCOPE=drive
+CLIENT_SECRET=""
+FORCE_REAUTH=no
+
+# rclone 1.60 is what Ubuntu 24.04 and Mint 22 ship, and every feature OurSync uses is tested
+# against it in CI. Older than that is untested rather than known-broken.
+RCLONE_FLOOR=1.60
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*" >&2; }
+rule() { printf '\n%s\n\n' "------------------------------------------------------------------------"; }
+
+usage() {
+    cat <<USAGE
+$PROG - create or re-authorise OurSync's per-user configuration
+
+  --scope drive|drive.readonly   what to ask Google for (default: drive, which can write)
+  --client-secret PATH           the OAuth client JSON downloaded from Google Cloud
+                                 (default: $CONF_DIR/client_secret.json)
+  --remote NAME                  name of the Drive remote (default: $REMOTE)
+  --mount DIR                    where Drive appears (default: $MOUNT)
+  --force-reauth                 re-run the Google consent even if the scope already matches
+  --help
+
+Run it with no options the first time. Run it again with --scope drive to turn a read-only
+installation into one that can write.
+
+rclone asks whether to use a web browser for the consent. Over ssh, answer Y anyway and tunnel
+the port it listens on from the machine that has the browser:
+
+    ssh -L 53682:localhost:53682 user@host
+
+The consent then redirects to 127.0.0.1:53682 in your own browser and arrives at rclone through
+the tunnel. Answering N instead works too, and rclone prints what to run on the other machine.
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --scope) SCOPE="${2:-}"; shift 2 ;;
+        --scope=*) SCOPE="${1#*=}"; shift ;;
+        --client-secret) CLIENT_SECRET="${2:-}"; shift 2 ;;
+        --client-secret=*) CLIENT_SECRET="${1#*=}"; shift ;;
+        --remote) REMOTE="${2:-}"; shift 2 ;;
+        --remote=*) REMOTE="${1#*=}"; shift ;;
+        --mount) MOUNT="${2:-}"; shift 2 ;;
+        --mount=*) MOUNT="${1#*=}"; shift ;;
+        --force-reauth) FORCE_REAUTH=yes; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "unknown option: $1 (try --help)" ;;
+    esac
+done
+
+case "$SCOPE" in
+    drive|drive.readonly) ;;
+    *) die "--scope must be drive or drive.readonly, not '$SCOPE'" ;;
+esac
+
+[ -z "$CLIENT_SECRET" ] && CLIENT_SECRET="$CONF_DIR/client_secret.json"
+
+command -v rclone > /dev/null || die "rclone is not installed (apt install rclone, or rclone.org/install)"
+
+rclone_version=$(rclone version 2>/dev/null | head -1 | sed -n 's/^rclone v\([0-9.]*\).*/\1/p')
+if [ -n "$rclone_version" ]; then
+    lowest=$(printf '%s\n%s\n' "$RCLONE_FLOOR" "$rclone_version" | sort -V | head -1)
+    [ "$lowest" = "$RCLONE_FLOOR" ] \
+        || note "WARNING: rclone $rclone_version is older than $RCLONE_FLOOR, which is the oldest version tested."
+fi
+
+mkdir -p -- "$CONF_DIR" "$MOUNT" "$PIN_DIR" "$CACHE_DIR"
+chmod 700 "$CONF_DIR"
+
+# ---------------------------------------------------------------------------------------------
+# The Drive remote, and the one-time Google setup behind it.
+# ---------------------------------------------------------------------------------------------
+
+existing_scope=$(rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^scope = //p')
+existing_type=$(rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^type = //p')
+
+if [ -n "$existing_type" ] && [ "$existing_type" != drive ]; then
+    die "an rclone remote called '$REMOTE' already exists and is not a Drive remote (type=$existing_type)"
+fi
+
+authorise_notes() {
+    cat <<'NOTES'
+OurSync ships no OAuth client ID and never will. Seeing a whole Drive needs Google's restricted
+"drive" scope, and an application distributing its own client ID with that scope needs OAuth
+verification plus an annually renewed third-party security assessment. A client from your own
+Google Cloud project falls under Google's personal-use exemption instead: no verification, no
+assessment, and an API quota nobody else is sharing.
+
+Once, in your browser:
+
+  1. console.cloud.google.com - create a project (any name).
+  2. APIs & Services > Library > "Google Drive API" > Enable.
+  3. APIs & Services > OAuth consent screen - User type External, fill in the app name and your
+     own email, and add your own Google account under Test users / Audience.
+  4. APIs & Services > Credentials > Create credentials > OAuth client ID,
+     Application type "Desktop app" > Create > Download JSON.
+
+Then save that file as:
+
+NOTES
+    printf '  %s\n\n' "$CLIENT_SECRET"
+    cat <<'NOTES'
+You will see an "unverified app" warning when you consent. That is expected: the app is yours and
+you have not paid Google to verify it. If Google starts demanding re-authorisation every seven
+days, set the project's publishing status to "In production" on the OAuth consent screen, which
+stops the test-mode refresh-token expiry.
+NOTES
+}
+
+read_json_field() {
+    sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' -- "$2" | head -1
+}
+
+if [ -z "$existing_type" ]; then
+    rule
+    note "No rclone remote called '$REMOTE' yet."
+    rule
+    authorise_notes
+    [ -r "$CLIENT_SECRET" ] || die "no OAuth client JSON at $CLIENT_SECRET - follow the steps above, then run '$PROG' again"
+
+    client_id=$(read_json_field client_id "$CLIENT_SECRET")
+    client_secret=$(read_json_field client_secret "$CLIENT_SECRET")
+    [ -n "$client_id" ] && [ -n "$client_secret" ] \
+        || die "$CLIENT_SECRET has no client_id/client_secret - download the Desktop app client JSON again"
+    chmod 600 -- "$CLIENT_SECRET" 2>/dev/null || true
+
+    note "Creating remote '$REMOTE' with scope '$SCOPE'. rclone will ask about the browser."
+    rclone config create "$REMOTE" drive \
+        client_id="$client_id" client_secret="$client_secret" scope="$SCOPE" \
+        || die "authorising '$REMOTE' failed"
+    note "created remote '$REMOTE'"
+
+elif [ "$existing_scope" != "$SCOPE" ] || [ "$FORCE_REAUTH" = yes ]; then
+    rule
+    note "Remote '$REMOTE' has scope '${existing_scope:-unset}'; re-authorising it for '$SCOPE'."
+    note "Google will ask for consent again, because the permissions being asked for have changed."
+    rule
+    # Two steps, and both are needed. The first changes only the configured scope:
+    # config_refresh_token=false keeps the existing token, so a failure here leaves a working
+    # remote rather than an unusable one. The second replaces the token, which is the only way a
+    # scope change takes effect - Google binds the scope to the token, not to the configuration.
+    rclone config update "$REMOTE" scope="$SCOPE" config_refresh_token=false --non-interactive \
+        > /dev/null 2>&1
+    [ "$(rclone config show "$REMOTE" | sed -n 's/^scope = //p')" = "$SCOPE" ] \
+        || die "could not set scope '$SCOPE' on '$REMOTE'"
+    rclone config reconnect "$REMOTE:" || die "re-authorising '$REMOTE' failed"
+    note "re-authorised '$REMOTE' with scope '$SCOPE'"
+else
+    note "remote '$REMOTE' already has scope '$SCOPE'"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# The union. Rebuilt every run so a changed pin directory takes effect, which is harmless: it
+# holds no credentials of its own, only a reference to the Drive remote.
+#
+#   <pin dir>:nc   local disk, and ":nc" so nothing is ever *created* here by accident. A pin is
+#                  placed deliberately by oursync; a new file written into the mount goes to Drive.
+#   search epall   a read takes the first upstream, in configured order, where the path exists -
+#                  so the local copy wins and the file is served from disk.
+#   action epall   a write to an existing file applies to every upstream holding it, so a pinned
+#                  copy cannot silently diverge from the copy in Drive.
+# ---------------------------------------------------------------------------------------------
+
+rclone config delete "$UNION" > /dev/null 2>&1 || true
+rclone config create "$UNION" union \
+    upstreams "$PIN_DIR:nc $REMOTE:" \
+    search_policy epall \
+    action_policy epall \
+    create_policy epmfs \
+    --non-interactive > /dev/null || die "could not create the union remote '$UNION'"
+note "configured union remote '$UNION'"
+
+if [ ! -e "$CONF" ]; then
+    umask 077
+    cat > "$CONF" <<CONF_BODY
+# OurSync configuration. Shell syntax, sourced by the oursync script.
+REMOTE=$REMOTE
+UNION=$UNION
+MOUNT=$MOUNT
+PIN_DIR=$PIN_DIR
+CACHE_DIR=$CACHE_DIR
+CACHE_MAX_SIZE=20G
+CACHE_MAX_AGE=72h
+
+# auto: the mount is read-only exactly when the remote's scope is read-only, so a write fails at
+# once rather than part-way through a save. yes/no override it.
+READ_ONLY=auto
+
+# How long a closed file waits before being uploaded, so an application that saves repeatedly
+# spends one upload rather than five.
+WRITE_BACK=10s
+
+# rclone's --bwlimit syntax, empty for no limit. Worth setting on a slow uplink: Drive has no
+# delta upload, so every save of a large file spends its whole size.
+BWLIMIT=
+
+# Control port, used to invalidate the mount's directory cache the moment a pin changes - without
+# it a new pin stays invisible until --dir-cache-time expires. Bound to localhost, and given a
+# generated password so that a web page cannot POST to it.
+RC_ADDR=127.0.0.1:5572
+RC_USER=oursync
+RC_PASS=$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 24)
+CONF_BODY
+    chmod 600 "$CONF"
+    note "wrote $CONF"
+else
+    note "kept existing $CONF"
+fi
+
+mode="read-write"
+case "$SCOPE" in *readonly*) mode="read-only" ;; esac
+
+cat <<DONE
+
+Set up. Drive will appear at $MOUNT, $mode.
+
+    systemctl --user enable --now oursync-mount.service     # mount it now and at every login
+    systemctl --user enable --now oursync-refresh.timer     # keep pinned files up to date
+    oursync doctor                                          # check it over
+
+Right-click a file under $MOUNT in Nemo for "Make available offline".
+DONE

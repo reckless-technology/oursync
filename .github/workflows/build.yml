@@ -1,0 +1,152 @@
+name: build
+
+# OurSync is shell, so there is nothing to compile and the whole of CI is: is it well-formed, does
+# it package, and does the rclone it claims to support actually do what it asks? The third is the
+# one that earns its keep - the dependency line in debian/control is a measurement taken here, not
+# a guess, because Ubuntu 24.04 (which Mint 22 is built on) ships rclone 1.60.1 while development
+# happened on 1.76.
+#
+# This repository is public, so every job runs on a GitHub-hosted image and none of it touches the
+# organisation's self-hosted machines.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: shellcheck, at style level, on every script in the repository
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          # -S style is the strictest level: it fails on informational findings too, which is what
+          # keeps a deliberate exception documented with a disable comment rather than ignored.
+          shellcheck -S style \
+            rclone/oursync rclone/oursync-setup rclone/oursync-nemo rclone/install.sh \
+            tools/*.sh
+      - name: the unit and action templates must substitute to something systemd can parse
+        run: |
+          set -euo pipefail
+          mkdir -p build/check
+          for f in rclone/oursync-*.service.in rclone/oursync-*.timer.in rclone/nemo/*.in; do
+            out="build/check/$(basename "${f%.in}")"
+            sed -e 's|@BIN@|/usr/bin|g' "$f" > "$out"
+            grep -q '@' "$out" && { echo "::error file=$f::an @PLACEHOLDER@ survived substitution"; exit 1; }
+            echo "ok $out"
+          done
+          systemd-analyze verify --user build/check/oursync-mount.service || true
+          test -s build/check/10_oursync-pin.nemo_action
+
+  package:
+    name: the .deb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0        # version.sh reads the tags
+      - name: Install the packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends debhelper devscripts lintian fakeroot
+      - name: Build it
+        run: tools/build-deb.sh
+      - name: lintian
+        run: |
+          set -euo pipefail
+          # A package nobody has reviewed is worth checking against Debian's own rules. Errors fail
+          # the job; warnings are printed, because some of them are about things a package outside
+          # the archive cannot satisfy.
+          lintian --fail-on error --no-tag-display-limit build/deb/*.changes || {
+            echo "::error::lintian reported an error"; exit 1; }
+      - name: Install it, use it, remove it
+        run: |
+          set -euo pipefail
+          deb=$(echo build/deb/oursync_*_all.deb)
+          sudo apt-get install -y "./$deb"
+          echo "--- what it placed ---"
+          dpkg -L oursync
+          echo "--- version ---"
+          oursync version
+          # The script turns an unsubstituted @VERSION@ into "0.0.0 (from source)" rather than
+          # printing a placeholder, so that string - not the placeholder - is what a package whose
+          # build skipped the substitution would show.
+          if oursync version | grep -q 'from source'; then
+            echo "::error::the packaged script reports its version as from-source"; exit 1
+          fi
+          echo "--- help ---"
+          oursync help
+          echo "--- man page ---"
+          man --where oursync
+          echo "--- doctor, with nothing set up: it must report rather than crash ---"
+          oursync doctor
+          echo "--- setup --help ---"
+          oursync setup --help
+          echo "--- the units parse ---"
+          systemd-analyze verify --user /usr/lib/systemd/user/oursync-mount.service || true
+          test -f /usr/lib/systemd/user/oursync-refresh.timer
+          test -f /usr/share/nemo/actions/10_oursync-pin.nemo_action
+          echo "--- removal ---"
+          sudo apt-get remove -y oursync
+          ! command -v oursync
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oursync-deb
+          path: build/deb/*
+          retention-days: 14
+
+  rclone-floor:
+    name: rclone ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The version Mint and Ubuntu ship, which is what "Depends: rclone (>= 1.60)" claims.
+          - label: "from apt (the floor)"
+            source: apt
+          # And the current one, so a newer rclone that drops or renames something is caught here
+          # rather than on somebody's machine after an upgrade.
+          - label: "current from rclone.org"
+            source: upstream
+            version: "1.76.0"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install rclone and fuse3
+        env:
+          SOURCE: ${{ matrix.source }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fuse3
+          if [ "$SOURCE" = apt ]; then
+            sudo apt-get install -y --no-install-recommends rclone
+          else
+            cd "$(mktemp -d)"
+            curl -fsSL -o SHA256SUMS "https://downloads.rclone.org/v$VERSION/SHA256SUMS"
+            curl -fsSL -o rclone.zip "https://downloads.rclone.org/v$VERSION/rclone-v$VERSION-linux-amd64.zip"
+            # The vendor publishes checksums; a download nobody verified is not a dependency test.
+            want=$(grep "rclone-v$VERSION-linux-amd64.zip" SHA256SUMS | awk '{print $1}')
+            got=$(sha256sum rclone.zip | awk '{print $1}')
+            [ "$want" = "$got" ] || { echo "::error::rclone $VERSION checksum mismatch"; exit 1; }
+            unzip -q rclone.zip
+            sudo install -m 755 "rclone-v$VERSION-linux-amd64/rclone" /usr/local/bin/rclone
+          fi
+          rclone version | head -2
+      - name: Does this rclone do everything OurSync asks of it?
+        run: tools/rclone-floor-test.sh

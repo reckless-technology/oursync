@@ -1,0 +1,13 @@
+[Unit]
+Description=OurSync - bring pinned files back into agreement with Drive
+Documentation=https://github.com/reckless-technology/oursync
+# Pointless without the mount, and its vfs/forget call needs the mount's control port.
+After=oursync-mount.service
+Wants=oursync-mount.service
+
+[Service]
+Type=oneshot
+# --quiet reports only what changed and the conflicts, so the journal stays readable when nothing
+# has happened, which is most of the time. A conflict exits non-zero and so shows as a failed run:
+# that is deliberate, because a conflict needs a person.
+ExecStart=@BIN@/oursync refresh --quiet

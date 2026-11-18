@@ -1,0 +1,5 @@
+oursync (@VERSION@) @DISTRIBUTION@; urgency=medium
+
+  * @HEADLINE@
+
+ -- Jonny Reckless <jonny@recklesstechnology.com>  @DATE@

@@ -16,7 +16,9 @@ CONF="${OURSYNC_CONF:-$HOME/.config/oursync/oursync.conf}"
 MOUNT="${MOUNT:-$HOME/Drive}"
 PIN_DIR="${PIN_DIR:-$HOME/.local/share/oursync/pinned}"
 
-OURSYNC="${OURSYNC_BIN:-$HOME/.local/bin/oursync}"
+# Installed by the package at /usr/bin, or under $HOME by install.sh. Nemo runs actions with
+# /usr/bin on PATH but not always $HOME/.local/bin, so try PATH first and fall back.
+OURSYNC="${OURSYNC_BIN:-$(command -v oursync || printf '%s' "$HOME/.local/bin/oursync")}"
 
 notify() {
     command -v notify-send > /dev/null 2>&1 || return 0

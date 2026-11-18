@@ -22,6 +22,7 @@
 #
 # Usage:  tools/measure-read-throughput.sh [remote:path]
 # Env:    WINDOW_MIB (default 512), FIRST_OFFSET_MIB (default 1024)
+# shellcheck source=/dev/null
 set -u
 
 REMOTE="${1:-gdrive:Videos/Film/Prometheus.mkv}"
@@ -46,7 +47,7 @@ fi
 # and the concurrency ladder is run twice so a win can be told from a lucky sample.
 SEQUENCE="1 2 4 8 16 1 2 4 8 16 1 8"
 
-COUNT=$(echo $SEQUENCE | wc -w)
+COUNT=$(echo "$SEQUENCE" | wc -w)
 NEEDED=$((FIRST_OFFSET + COUNT * WINDOW))
 if [ "$NEEDED" -gt "$SIZE" ]; then
     echo "file is $SIZE bytes; this run needs $NEEDED. Use a larger file or a smaller WINDOW_MIB." >&2
@@ -57,9 +58,9 @@ echo "== Drive read throughput"
 echo "host:     $(hostname) - $(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME") - kernel $(uname -r)"
 echo "date:     $(date -Is)"
 echo "rclone:   $(rclone version | head -1)"
-echo "link:     $(for i in $(ls /sys/class/net | grep -v lo); do
-                    [ "$(cat /sys/class/net/$i/operstate 2>/dev/null)" = up ] || continue
-                    s=$(cat /sys/class/net/$i/speed 2>/dev/null)
+echo "link:     $(for d in /sys/class/net/*; do i=${d##*/}; [ "$i" = lo ] && continue
+                    [ "$(cat "$d/operstate" 2>/dev/null)" = up ] || continue
+                    s=$(cat "$d/speed" 2>/dev/null)
                     printf '%s(%s) ' "$i" "${s:-wireless}"
                   done)"
 echo "file:     $REMOTE ($SIZE bytes)"

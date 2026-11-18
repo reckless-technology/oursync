@@ -37,21 +37,21 @@ in a sparse file, bounded by `CACHE_MAX_SIZE` and evicted by age and size. Pinni
 
 ## Install
 
-Needs an rclone remote for Drive first (default name `gdrive-own`):
+From a checkout, for the current user:
 
 ```sh
-rclone authorize drive --drive-scope drive.readonly      # on a machine with a browser
-rclone config create gdrive-own drive scope drive.readonly token '<the JSON it printed>'
-```
-
-Then:
-
-```sh
-./install.sh
+./install.sh                                         # also runs oursync setup
 systemctl --user enable --now oursync-mount.service
+systemctl --user enable --now oursync-refresh.timer
 ```
 
-Everything lands under `$HOME`. No root, no system file touched.
+Everything lands under `$HOME`. No root, no system file touched. `install.sh` places the scripts,
+the Nemo entries and the user units, then hands over to `oursync setup`, which builds the Drive
+remote, the union over it and the configuration — and walks the one-time Google Cloud step if there
+is no remote yet.
+
+For a machine-wide install, build the package instead: `tools/build-deb.sh`, then
+`sudo apt install ./build/deb/oursync_*_all.deb` and `oursync setup` once per user.
 
 ## Use
 
@@ -60,21 +60,37 @@ oursync pin  ~/Drive/Audio/session.wav     # keep it on disk
 oursync unpin ~/Drive/Audio/session.wav    # give the space back
 oursync list                               # what is pinned, and what it costs
 oursync status ~/Drive/some/file           # pinned or streamed
-oursync doctor                             # the whole configuration and its state
+oursync refresh                            # pull remote changes into pinned copies
+oursync setup --scope drive                # re-authorise so the mount can write
+oursync doctor                             # the configuration, its state, and anything wrong
 ```
 
 Or right-click in Nemo: **Make available offline** / **Remove local copy**. The two entries are
 gated on `Conditions=exec`, so each appears only where it applies and neither appears outside the
 mount.
 
-## Read-only, for now
+## Two-way sync, and what decides the direction
 
-The Drive remote holds the **`drive.readonly`** scope, so the mount is started with `--read-only`.
-A write fails immediately and clearly rather than part-way through a save.
+The mount is read-write when the remote's scope allows it. `cmd_mount` derives the flag rather than
+hard-coding it: a `drive.readonly` remote is mounted `--read-only` so a write fails at once with
+`EROFS`, instead of being accepted and then refused by the API half-way through a save.
+`oursync setup --scope drive` upgrades a read-only installation, which needs a new token — Google
+binds the scope to the token, so changing the configuration alone does nothing.
 
-Making it read-write means re-authorising the remote with the full `drive` scope and dropping
-`--read-only` from `cmd_mount`. That is a deliberate decision, not an oversight: a read-write mount
-over 5 TB of irreplaceable data is a different risk, and the Windows client already handles writes.
+Changes made **through the mount** need no sync at all. A new file goes to Drive, because `:nc`
+excludes local disk from the CREATE category. An edit to a pinned file goes to both copies, because
+`action_policy=epall` applies an action to every upstream holding the path. A delete removes both.
+
+Changes made **to Drive from elsewhere** — the web, a phone, another machine — are the case that
+needs work. A streamed file picks them up within `--poll-interval`. A pinned file cannot, because
+the union serves the local copy without ever asking Drive. `oursync refresh` is the only thing that
+closes that, and `oursync-refresh.timer` runs it every five minutes.
+
+Its direction rule follows from one sentence: **a pin is a cache of Drive, not a second replica.**
+So Drive wins and the local copy is re-fetched. A local copy that is *newer* and differs means
+something bypassed the mount, which is a **conflict**: it is reported with both timestamps, nothing
+is overwritten, and the refresh exits non-zero so the timer's run shows as failed. That is
+deliberate — overwriting it could destroy the only copy of something, and a conflict wants a person.
 
 ## What this does not do
 

@@ -1,0 +1,141 @@
+.TH OURSYNC 1 "2026-11-17" "OurSync" "User Commands"
+.SH NAME
+oursync \- Google Drive as a filesystem: streamed, with chosen files kept on local disk
+.SH SYNOPSIS
+.B oursync
+.I command
+.RI [ arguments ]
+.SH DESCRIPTION
+.B OurSync
+presents Google Drive as an ordinary directory tree, by default at
+.IR ~/Drive .
+Nothing is downloaded until something reads it, so a Drive far larger than the local disk costs
+nothing to mount; what has been read is cached and evicted as the cache fills.
+.PP
+A file that must always be fast, or must survive going offline, is
+.IR pinned :
+a real copy is placed on local disk, served from there, and never evicted. Pinning is what
+.B OurSync
+adds to
+.BR rclone (1),
+whose cache is eviction-based with no way to say
+.IR "keep this one" .
+.PP
+The mount is read-write when the configured Drive remote allows it. Changes made through the mount
+reach Drive by themselves. Changes made to Drive elsewhere reach a streamed file within the poll
+interval, and a pinned file when
+.B oursync refresh
+runs.
+.SH COMMANDS
+.TP
+.B pin \fIpath\fR...
+Place a real copy of each path on local disk and serve reads from there. A directory is pinned
+whole, and afterwards tracks files Drive gains.
+.TP
+.B unpin \fIpath\fR...
+Remove the local copy; the file goes back to streaming. Refuses if the file is not in Drive, so
+the only copy cannot be deleted.
+.TP
+.B refresh \fR[\fB\-\-quiet\fR] [\fIpath\fR...]
+Bring pinned copies back into agreement with Drive. A pin is a cache of Drive, so Drive is the
+truth and a pinned file whose Drive copy has changed is re-copied. A local copy that is newer and
+differs is a
+.I conflict:
+it is reported and nothing is overwritten. Exits non-zero if there was a conflict.
+.TP
+.B list
+What is pinned, and what it costs on disk.
+.TP
+.B status \fIpath\fR...
+Whether each path is pinned or streamed.
+.TP
+.B mount \fR[\fIrclone flags\fR]
+Mount Drive, in the foreground. Normally run by
+.BR oursync\-mount.service .
+Extra arguments are passed to
+.BR "rclone mount" .
+.TP
+.B unmount
+Unmount it.
+.TP
+.B setup \fR[\fB\-\-scope\fR \fIdrive\fR|\fIdrive.readonly\fR]
+Create or re-authorise the per-user configuration: the Drive remote, the union over it and the
+configuration file. Run once per user after installing, and again with
+.B \-\-scope drive
+to turn a read-only installation into one that can write. See
+.B oursync setup \-\-help
+for the rest of its options.
+.TP
+.B doctor
+Print the whole configuration, its current state, and anything wrong with it.
+.TP
+.B version
+Print the version.
+.SH FILES
+.TP
+.I ~/.config/oursync/oursync.conf
+Shell syntax, sourced by
+.BR oursync .
+Sets the remote and union names, the mount point, the pin directory, the cache directory and its
+size and age limits, the write-back delay, an optional bandwidth limit, and the mount's control
+port and its generated password.
+.TP
+.I ~/.config/oursync/pins
+What was asked to be kept offline, one per line: a kind
+.RB ( d
+or
+.BR f )
+and a path relative to the mount. Distinct from what happens to be on disk, because a pinned
+directory must gain the files Drive gains.
+.TP
+.I ~/.config/oursync/client_secret.json
+The OAuth client downloaded from your own Google Cloud project.
+.B OurSync
+ships no client ID of its own.
+.TP
+.I ~/.local/share/oursync/pinned
+The pinned copies. The first upstream of the union, with
+.BR :nc ,
+so nothing is ever created here by accident.
+.TP
+.I ~/.cache/oursync
+The streaming cache, bounded by
+.I CACHE_MAX_SIZE
+and
+.IR CACHE_MAX_AGE .
+.SH SERVICES
+.TP
+.B oursync\-mount.service
+Mounts Drive at login.
+.B systemctl \-\-user enable \-\-now oursync\-mount.service
+.TP
+.B oursync\-refresh.timer
+Runs
+.B oursync refresh \-\-quiet
+every five minutes, which is the only thing that keeps a pinned file current when Drive is changed
+from somewhere else.
+.SH LIMITS
+Google's API offers no differential upload, so saving a file uploads all of it however little
+changed. Google Docs, Sheets and Slides have no byte stream and appear as stubs. Pin status shows
+in Nemo only. One Google account per installation.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The operation failed, or
+.B refresh
+found a conflict.
+.TP
+.B 2
+The command line was wrong.
+.SH SEE ALSO
+.BR rclone (1),
+.BR rclone\-mount (1),
+.BR fusermount3 (1)
+.PP
+.UR https://github.com/reckless-technology/oursync
+.UE
+.SH COPYRIGHT
+Copyright \(co 2026 Jonny Reckless. GNU General Public License, version 3 or later.

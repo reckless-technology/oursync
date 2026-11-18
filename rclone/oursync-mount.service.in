@@ -1,6 +1,6 @@
 [Unit]
-Description=OurSync - Google Drive streamed at @MOUNT@, with pinned files on local disk
-Documentation=https://rclone.org/commands/rclone_mount/
+Description=OurSync - Google Drive streamed, with pinned files on local disk
+Documentation=https://github.com/reckless-technology/oursync
 # The mount is useless without a route out, and rclone started before the network is up spends its
 # first minutes failing listings that the VFS then caches as empty directories.
 After=network-online.target
@@ -9,14 +9,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 # `oursync mount` runs rclone in the foreground, which is what systemd wants; it reads the mount
-# flags and the pin directory from ~/.config/oursync/oursync.conf so they stay in one place.
+# flags, the mount point and the pin directory from ~/.config/oursync/oursync.conf, so this unit
+# names no path of its own and one copy of it serves every user on the machine.
 ExecStart=@BIN@/oursync mount
-ExecStop=/bin/fusermount -u @MOUNT@
+ExecStop=@BIN@/oursync unmount
 Restart=on-failure
 RestartSec=10s
 # A FUSE mount left behind by a crash makes the next start fail with "transport endpoint is not
 # connected", so clear it before starting rather than requiring a manual fusermount.
-ExecStartPre=-/bin/fusermount -u @MOUNT@
+ExecStartPre=-@BIN@/oursync unmount
 
 [Install]
 WantedBy=default.target

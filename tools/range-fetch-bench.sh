@@ -25,6 +25,7 @@
 #          WINDOW_MIB      bytes per sample, split across the streams (default 512)
 #          FIRST_OFFSET_MIB  where in the file to start (default 1024)
 #          CONCURRENCY     stream counts to try, in order (default "1 2 4 8 16 1 2 4 8 16 1 8")
+# shellcheck source=/dev/null
 set -u
 
 FILE_ID="${1:?usage: range-fetch-bench.sh <drive-file-id>}"
@@ -83,6 +84,8 @@ URL="https://www.googleapis.com/drive/v3/files/$FILE_ID?alt=media&supportsAllDri
 # Fail early and loudly rather than reporting a fast zero-byte transfer as throughput.
 PROBE=$(curl -s -o /dev/null -w '%{http_code} %{size_download}' \
     -H "Authorization: Bearer $TOKEN" -H "Range: bytes=0-1048575" "$URL")
+# Deliberate word splitting: the probe is "code bytes" and both halves are wanted.
+# shellcheck disable=SC2086
 set -- $PROBE
 if [ "$1" != "206" ] && [ "$1" != "200" ]; then
     echo "probe failed: HTTP $1 (is the token fresh, and the file id right?)" >&2
@@ -116,9 +119,9 @@ control() {
 echo "== Drive range-fetch throughput"
 echo "host:     $(hostname) - $(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME") - kernel $(uname -r)"
 echo "date:     $(date -Is)"
-echo "link:     $(for i in $(ls /sys/class/net | grep -v lo); do
-                    [ "$(cat /sys/class/net/$i/operstate 2>/dev/null)" = up ] || continue
-                    s=$(cat /sys/class/net/$i/speed 2>/dev/null)
+echo "link:     $(for d in /sys/class/net/*; do i=${d##*/}; [ "$i" = lo ] && continue
+                    [ "$(cat "$d/operstate" 2>/dev/null)" = up ] || continue
+                    s=$(cat "$d/speed" 2>/dev/null)
                     case "$s" in ''|-1) s=wireless ;; *) s="${s}Mb" ;; esac
                     printf '%s(%s) ' "$i" "$s"
                   done)"

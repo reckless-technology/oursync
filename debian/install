@@ -1,0 +1,8 @@
+build/staged/oursync                       usr/bin
+build/staged/oursync-setup                 usr/bin
+build/staged/oursync-nemo                  usr/bin
+build/staged/10_oursync-pin.nemo_action    usr/share/nemo/actions
+build/staged/11_oursync-unpin.nemo_action  usr/share/nemo/actions
+build/staged/oursync-mount.service         usr/lib/systemd/user
+build/staged/oursync-refresh.service       usr/lib/systemd/user
+build/staged/oursync-refresh.timer         usr/lib/systemd/user

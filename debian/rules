@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+# OurSync is shell, so there is nothing to compile. "Building" is the two substitutions the scripts
+# and unit files carry: the version, which comes from the tags, and the install prefix, which is
+# /usr/bin for a package and $HOME/.local/bin for the from-source install.
+#
+# Everything staged lands under build/, which is the house rule and keeps a build tree out of the
+# index.
+
+export DH_VERBOSE = 1
+
+VERSION := $(shell dpkg-parsechangelog --show-field Version)
+STAGE := build/staged
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	mkdir -p $(STAGE)
+	for s in oursync oursync-setup oursync-nemo; do 		sed -e 's|@VERSION@|$(VERSION)|g' rclone/$$s > $(STAGE)/$$s; 		chmod 755 $(STAGE)/$$s; 	done
+	for f in rclone/nemo/*.nemo_action.in rclone/oursync-mount.service.in 	         rclone/oursync-refresh.service.in rclone/oursync-refresh.timer.in; do 		sed -e 's|@BIN@|/usr/bin|g' $$f > $(STAGE)/`basename $$f .in`; 		chmod 644 $(STAGE)/`basename $$f .in`; 	done
+
+override_dh_auto_clean:
+	rm -rf build
+
+# There is no test suite to run at package build time; the shellcheck and the functional tests run
+# in CI, against each rclone version the package claims to support.
+override_dh_auto_test:
