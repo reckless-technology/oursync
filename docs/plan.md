@@ -43,18 +43,29 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
 
 ## Next
 
-- **The live write test**, which is written and waiting: `tools/live-write-test.sh`. Everything
-  above is proved against a union of two local directories, which is all the union policies can
-  tell apart, plus a read-only Drive. The remote still holds `drive.readonly`, so the one thing not
-  yet exercised against Google is a real upload. The script covers create, edit, rename, delete and
-  its trash, a 24 MiB file, repeated saves inside the write-back window, a pinned file written
-  through the mount reaching both copies, and a pinned file changed in Drive behind the mount's
-  back. It works inside a folder of its own that it creates and removes, touches nothing else, and
-  refuses to run against a read-only mount — verified refusing, 2026-11-17. All it needs is one
-  re-consent: `oursync setup --scope drive`.
+- **A pinned file written through the mount goes stale locally.** Found by the first live run
+  against Drive, 2026-11-18 on `jonny-precision`: 14 of 15 checks passed, and the one that failed
+  is the one the test itself calls the worst failure this design can have. Writing a pinned file
+  through the mount updates Drive and leaves the local copy on its old bytes, so until the next
+  `oursync refresh` the mount serves what you just overwrote — `search_policy=epall` takes the
+  local upstream first, and it is the stale one.
 
-  Until that is run, the product's headline feature is unproven against Google and the mount on
-  `jonny-precision` is read-only in practice, whatever the code can do.
+  The cause is that the VFS writes a whole object rather than updating one, so the union routes it
+  through CREATE, which `:nc` excludes the local upstream from, rather than through ACTION, where
+  `epall` would have written both. `:nc` is load-bearing — it is what keeps new files off a disk
+  far smaller than the corpus — so this is a design question, not a flag to flip, and the refresh
+  timer heals it within five minutes rather than leaving it wrong for ever.
+- **The live write test** has now been run, and everything else in it passed against the real
+  Drive: create, edit, rename, delete and its recoverable trash, 24 MiB byte for byte, repeated
+  saves inside the write-back window, and a remote change pulled into a pinned copy.
+  `tools/live-write-test.sh` works inside a folder of its own at the top of Drive that it creates
+  and removes, touches nothing else, and refuses to run against a read-only mount. It should be
+  run again whenever the union's policies or the write path change; it is the only thing that
+  tests them against Google rather than against two local directories, which is all the union
+  policies can tell apart.
+
+  Run it with the exit status in view. A pipeline that ends in `tail` reports `tail`'s status, so
+  the run that found the pin bug looked like a clean exit while printing `1 failed`.
 - **A Cloud project must be published to production**, which is a step in the walkthrough rather
   than engineering, but it is the difference between a mount that keeps working and one that asks
   for consent every seven days. Google ties that to the consent screen carrying no logo. Jonny's
