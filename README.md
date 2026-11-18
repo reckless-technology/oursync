@@ -10,13 +10,12 @@ laptop is the case this was built for. What has been read is cached and evicted 
 A file that must always be fast is **pinned** — a real copy is placed on local disk, served from
 there, and never evicted.
 
-Google publishes Drive for desktop on Windows and macOS, and nothing for Linux.
-
 ```sh
 oursync pin   ~/Drive/Audio/session.wav    # keep it on disk
 oursync unpin ~/Drive/Audio/session.wav    # give the space back
 oursync list                               # what is pinned, and what it costs
-oursync doctor                             # the whole configuration and its state
+oursync refresh                            # pull remote changes into pinned copies
+oursync doctor                             # the configuration, its state, and anything wrong
 ```
 
 Or right-click a file in Nemo: **Make available offline** / **Remove local copy**.

@@ -125,7 +125,17 @@ jobs:
           test -f /usr/share/nemo/actions/10_oursync-pin.nemo_action
           echo "--- removal ---"
           sudo apt-get remove -y oursync
-          ! command -v oursync
+          # Test the files, not `command -v oursync`: this shell ran oursync a moment ago, so bash
+          # has the path in its hash table and reports it from there whether or not the file is
+          # still on disk. That read as a package which would not uninstall.
+          for f in /usr/bin/oursync /usr/bin/oursync-setup /usr/bin/oursync-nemo \
+                   /usr/lib/systemd/user/oursync-mount.service \
+                   /usr/lib/systemd/user/oursync-refresh.timer \
+                   /usr/share/nemo/actions/10_oursync-pin.nemo_action \
+                   /usr/share/man/man1/oursync.1.gz; do
+            if [ -e "$f" ]; then echo "::error::$f survived removal"; exit 1; fi
+          done
+          echo "every file the package placed is gone"
       - uses: actions/upload-artifact@v4
         with:
           name: oursync-deb
