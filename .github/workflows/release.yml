@@ -35,7 +35,12 @@ jobs:
   release:
     name: Build, test and draft
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 20 was not enough. On 2026-11-18 two runs in a row drew a runner whose Ubuntu mirror was
+    # crawling - rclone's 16.5 MB alone took four minutes - and the apt step ate fourteen of the
+    # twenty, leaving the release to be killed in the middle of its own test. A timeout kill is
+    # reported as a cancelled step with no error in the log, which reads like somebody pressed the
+    # button rather than like a slow mirror.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
         with:
@@ -79,7 +84,9 @@ jobs:
       - name: Install the packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          # Retries rather than one shot: the mirror a hosted runner draws is sometimes slow enough
+          # to drop a connection part-way, and a failed fetch here fails the whole release.
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
             dpkg-dev debhelper lintian fakeroot build-essential fuse3 rclone
 
       - name: Build the package
