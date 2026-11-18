@@ -374,7 +374,21 @@ cmd_mount() {
         note "$MOUNT will be read-only: $REMOTE has scope '$(remote_scope)'."
         note "Run '$PROG setup --scope drive' to re-authorise it for writing."
     else
-        flags+=(--vfs-write-back "$WRITE_BACK")
+        # --inplace is what keeps a pinned file's two copies together, and it is not an
+        # optimisation. Without it the VFS uploads to `<name>.<hash>.partial` and renames it over
+        # the target: the upload is a *create*, which `:nc` keeps out of the local upstream, and
+        # the rename then happens only where the partial landed. So a save reached Drive and left
+        # the pinned copy on its old bytes - and since the search policy takes the local upstream
+        # first, the mount went on serving what you had just overwritten until the next refresh.
+        # Writing straight to the name makes it an *update* of a file both upstreams hold, which
+        # `action_policy=epall` sends to both. Proved by the last two checks in
+        # tools/rclone-floor-test.sh, which fail without this flag.
+        #
+        # What it costs: an interrupted upload can leave a short file where the old one was,
+        # rather than leaving the old one untouched until the new one is complete. Drive commits
+        # an upload server-side, so that exposure is the local copy - which is a cache of Drive
+        # that `oursync refresh` rebuilds.
+        flags+=(--inplace --vfs-write-back "$WRITE_BACK")
     fi
     [ -n "$BWLIMIT" ] && flags+=(--bwlimit "$BWLIMIT")
 

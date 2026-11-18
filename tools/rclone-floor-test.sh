@@ -172,6 +172,7 @@ else
         --vfs-cache-max-age 72h \
         --vfs-read-chunk-size 64M \
         --vfs-read-chunk-size-limit 2G \
+        --inplace \
         --vfs-write-back 2s \
         --dir-cache-time 5m \
         --poll-interval 1m \
