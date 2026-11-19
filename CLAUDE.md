@@ -96,7 +96,7 @@ commit, and a new command comes with a case in `script-tests.sh`.
 
 **Coverage is gated at 92 % of the lines in `rclone/`**, measured with kcov 43 by
 `tools/coverage.sh` and run as the `coverage` job in `build.yml`. It was 95.8 % when the gate was set
-(2026-11-19, kcov 43, 429 lines in the four scripts). kcov is not packaged for Ubuntu 24.04, so the
+(2026-11-19, kcov 43, 430 lines in the four scripts). kcov is not packaged for Ubuntu 24.04, so the
 job builds the v43 tag and caches it; `coverage.sh` refuses any other version, because the gate
 depends on what kcov counts as a line. Nothing is excluded with a marker: the mount, control-port and
 consent paths all run against the stubs. What the percentage cannot show is that those paths work

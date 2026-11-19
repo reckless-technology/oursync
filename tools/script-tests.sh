@@ -312,6 +312,20 @@ expect_has "naming the mount" "$ERR" "not inside $MOUNT_DIR"
 run "$OURSYNC" status /etc/passwd
 expect_eq "a path outside the mount is refused" 1 "$RC"
 
+# The mount root is not a path under the mount. Before it was refused, `pin ~/Drive` handed rclone
+# the whole absolute path as if it were a path in Drive (gdrive-own:/home/.../Drive).
+mark_mounted
+for root in "$MOUNT_DIR" "$MOUNT_DIR/" "$MOUNT_DIR/." "$MOUNT_DIR/sub/.."; do
+    : > "$STUB_DIR/calls.log"
+    for verb in pin unpin refresh status; do
+        run "$OURSYNC" "$verb" "$root"
+        expect_eq "$verb '$root' is refused" 1 "$RC"
+        expect_has "$verb '$root' says it is the mount root" "$ERR" "the mount root itself"
+    done
+    expect_eq "rclone was never called for '$root'" "" "$(calls)"
+done
+rm -f "$STUB_DIR/mounted"
+
 run "$OURSYNC" pin
 expect_has "pin with no argument gives the usage" "$ERR" "usage: oursync pin"
 run "$OURSYNC" unpin
