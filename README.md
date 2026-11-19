@@ -141,6 +141,17 @@ each row saying how it was established. The ones worth knowing before you instal
 - **One account.** A second Google account needs a second remote, union and mount; the scripts
   assume one of each.
 - **No "Computers" backup roots.** The API offers no way to discover them.
+- **A file saved into `~/Drive` while the mount is down goes to local disk, not to Drive.** This is
+  how every FUSE mount on Linux behaves, OurSync's included: the mount point is an ordinary empty
+  directory when nothing is mounted on it, so a write lands there and is then hidden underneath the
+  mount when it comes back. Nothing is destroyed — the file is still on disk, and visible again if
+  the mount is stopped — but it is not in Drive and nothing says so.
+
+  The window is small and it closes by itself. Measured on 2026-11-18: killing the rclone process
+  outright, `systemd` restarts it and `~/Drive` is usable again in about 15 seconds, which is the
+  unit's `RestartSec` plus startup. `oursync doctor` says plainly whether the mount is up. If a
+  program was writing across that moment, stop the mount and look in `~/Drive` before starting it
+  again — anything sitting there went to disk rather than to Google.
 
 ## How it got here
 

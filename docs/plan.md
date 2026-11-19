@@ -68,6 +68,28 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
 
 ## Next
 
+- **The acceptance suite passes 57 of 57, twice consecutively**, against the installed 0.1.10
+  package and the real Drive, 2026-11-18 on `jonny-precision`. `tools/acceptance-test.sh` is the
+  corner-case half: twenty awkward filenames (quotes, `$`, backticks, pipes, a leading dash, a name
+  that looks like a flag, accents, CJK, an emoji, a trailing space, an embedded newline), a
+  254-character name, a zero-byte file, five levels of nesting, a megabyte of binary byte-for-byte,
+  pinning a directory and a name with a space, a file added to a pinned directory in Drive
+  arriving on refresh, unpin, rename, delete, a two-sided conflict reported and neither copy
+  touched, a modification time ten years in the future, a mount restart, the rclone process killed
+  outright, five wrong arguments, and the installed package's own files.
+
+  It was run twice on purpose. The first two runs failed in *different* places, and both were races
+  in the test rather than faults in the product — a suite that moves around is no use as a gate.
+  One assumed a pinned file's two copies arrive together, when the union writes local disk during
+  the save and the upload is held by `--vfs-write-back`. The other believed `mountpoint -q` about a
+  mount whose process had just been SIGKILLed; see the comment in the script, because that one can
+  be wrong in both directions within seconds.
+
+  **One real thing came out of it**, and it is in the README's limitations rather than fixed: a
+  write into `~/Drive` during the ~15 second restart window after a crash lands on local disk and
+  is then hidden under the mount. That is how FUSE works everywhere rather than something OurSync
+  does wrong, and nothing is destroyed, but a sync tool should say so. Worth revisiting after 1.0:
+  the mount point could be made unwritable while nothing is mounted on it.
 - **The live write test** passes 15 of 15 against the real Drive, 2026-11-18 on `jonny-precision`:
   create, edit, rename, delete and its recoverable trash, 24 MiB byte for byte, repeated
   saves inside the write-back window, and a remote change pulled into a pinned copy.
