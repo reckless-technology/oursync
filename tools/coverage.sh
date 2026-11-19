@@ -16,7 +16,7 @@
 # every file in rclone/ that has a shebang must appear in the report.
 set -u
 
-# Measured 95.8 % on 2026-11-19 (kcov 43, bash 5.2, 429 lines in four scripts). A few points under,
+# Measured 95.8 % on 2026-11-19 (kcov 43, bash 5.2, 430 lines in four scripts). A few points under,
 # so that an ordinary edit does not trip it and an untested new command does.
 GATE=92
 KCOV_VERSION=43
