@@ -176,7 +176,18 @@ jobs:
           # workflow stops being valid YAML - which it did, and GitHub reports that as a failed run
           # with no jobs and no log.
           {
-            echo "Install on Linux Mint 22 / Ubuntu 24.04 or newer:"
+            echo "Install on Linux Mint 22 / Ubuntu 24.04 or newer."
+            echo
+            echo "**Install a current rclone first.** OurSync needs rclone 1.67 or newer, and"
+            echo "cannot use 1.68.0. Mint 22 and Ubuntu 24.04 ship 1.60.1, which is below that, so"
+            echo "the package will install but OurSync will refuse to mount until rclone is newer."
+            echo "This is rclone's own recommended route and takes a few seconds:"
+            echo
+            echo '```sh'
+            echo "curl https://rclone.org/install.sh | sudo bash"
+            echo '```'
+            echo
+            echo "Then:"
             echo
             echo '```sh'
             echo "sudo apt install ./oursync_${VERSION}_all.deb"
@@ -185,8 +196,10 @@ jobs:
             echo "systemctl --user enable --now oursync-refresh.timer"
             echo '```'
             echo
-            echo "Needs rclone 1.60 or newer, which is what apt ships; every feature OurSync uses"
-            echo "is tested against that version in CI."
+            echo "That floor is measured, not guessed: below 1.67 a save to a pinned file reaches"
+            echo "Drive but not the local copy, and 1.68.0 alone cannot read the mount's"
+            echo "control-port address from the environment. Both failures are silent, so OurSync"
+            echo "refuses rather than letting either happen quietly."
             echo
             echo "\`oursync setup\` walks the one-time Google Cloud step. OurSync ships no OAuth"
             echo "client ID, because an application distributing its own with Google's restricted"
