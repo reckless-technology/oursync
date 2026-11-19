@@ -67,6 +67,34 @@ TAB=$(printf '\t')
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
 
+# What kind of OAuth client file is this? Google writes the JSON of a Desktop app client under a
+# top-level "installed" key and a Web application client under "web". Only the first works: a Web
+# client has no loopback redirect, so rclone's consent ends in redirect_uri_mismatch, a long way
+# from the cause. Whitespace is stripped first because Google's own file is one line and a person's
+# editor may have made it many.
+client_kind() {
+    local flat
+    flat=$(tr -d ' \t\r\n' < "$1" 2>/dev/null)
+    case "$flat" in
+        '{"installed":{'*) echo desktop ;;
+        '{"web":{'*) echo web ;;
+        *) echo unknown ;;
+    esac
+}
+
+# The Cloud project number, which is the digits before the first hyphen of the client id
+# ("123456789-abc.apps.googleusercontent.com"), or nothing if the id is not of that shape. Every
+# console page takes ?project=<number>, so this is what turns a generic link into the user's own.
+client_project() {
+    local number="${1%%-*}"
+    case "$1" in *-*) ;; *) return 0 ;; esac
+    case "$number" in ""|*[!0-9]*) ;; *) echo "$number" ;; esac
+}
+
+client_json_field() { # field file
+    sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' -- "$2" | head -1
+}
+
 # Turn a path the user gave us into a path relative to the mount root. Everything downstream - the
 # remote copy, the local pin, the cache invalidation - is keyed on this one string, so it is worth
 # being strict: a path outside the mount is a mistake, not something to interpret generously.
@@ -468,13 +496,29 @@ cmd_unmount() {
 }
 
 cmd_doctor() {
-    local scope mode problems=0
+    local scope mode problems=0 client_id project client_file
     scope=$(remote_scope)
     if is_read_only; then mode="READ-ONLY"; else mode="read-write"; fi
     printf 'oursync      %s\n' "$VERSION"
     printf 'rclone       %s\n' "$(rclone version 2>/dev/null | head -1 | sed 's/^rclone //')"
     printf 'config       %s%s\n' "$CONF" "$([ -r "$CONF" ] || printf ' (missing, using defaults)')"
     printf 'remote       %s  scope=%s\n' "$REMOTE" "${scope:-unknown}"
+    client_id=$(rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^client_id = //p')
+    project=$(client_project "$client_id")
+    client_file="$CONF_DIR/client_secret.json"
+    if [ -z "$client_id" ]; then
+        printf 'client       rclone'"'"'s built-in (shared quota; not an OurSync setup)\n'
+    else
+        printf 'client       project %s%s\n' "${project:-unknown}" \
+            "$([ -r "$client_file" ] && printf ', file %s' "$(client_kind "$client_file")")"
+    fi
+    # Whether the project is "In production" is not in the configuration, the token or anything
+    # rclone can be asked, and Google's API for it needs more access than OurSync should hold. So
+    # this does not guess: it says where to look, and what it looks like when it is wrong.
+    if [ -n "$project" ]; then
+        printf 'publishing   not readable from here - must say "In production", else the token\n'
+        printf '             expires after 7 days: %s\n' "https://console.cloud.google.com/auth/audience?project=$project"
+    fi
     printf 'union        %s  upstreams=%s\n' "$UNION" \
         "$(rclone config show "$UNION" 2>/dev/null | sed -n 's/^upstreams = //p')"
     printf 'mount        %s  %s, %s\n' "$MOUNT" \
@@ -503,6 +547,11 @@ cmd_doctor() {
         *readonly*) note "NOTE: $REMOTE is read-only, so $MOUNT cannot be written to."
                     note "      '$PROG setup --scope drive' re-authorises it for writing." ;;
     esac
+    if [ -r "$client_file" ] && [ "$(client_kind "$client_file")" = web ]; then
+        note "PROBLEM: $client_file is a Web application client, which fails with redirect_uri_mismatch."
+        note "         Create a Desktop app client instead and run '$PROG setup' again."
+        problems=1
+    fi
     if ! mountpoint -q "$MOUNT"; then
         note "PROBLEM: $MOUNT is not mounted - 'systemctl --user start oursync-mount.service'"
         problems=1
@@ -529,6 +578,16 @@ case "${1:-}" in
     # Deliberately absent from `help` and the man page: it is an entry point for oursync-setup, and
     # `doctor` is the same check with everything else a person actually wants. Not an omission.
     check-rclone) shift; require_usable_rclone ;;
+    # Likewise for the client file: oursync-setup asks here what kind of file it was given, so the
+    # one definition of "a Desktop app client" is this one, and doctor reads the same.
+    check-client)
+        shift
+        [ -r "${1:-}" ] || die "check-client: cannot read '${1:-}'"
+        client_id=$(client_json_field client_id "$1")
+        printf 'kind=%s\nclient_id=%s\nproject=%s\nhas_secret=%s\n' "$(client_kind "$1")" \
+            "$client_id" "$(client_project "$client_id")" \
+            "$([ -n "$(client_json_field client_secret "$1")" ] && echo yes || echo no)" ;;
+    client-project) shift; client_project "${1:-}" ;;
     # The sibling first, so a copy run straight out of a checkout uses its own setup rather than
     # whichever one happens to be on PATH.
     setup)

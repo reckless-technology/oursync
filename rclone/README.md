@@ -61,6 +61,7 @@ oursync unpin ~/Drive/Audio/session.wav    # give the space back
 oursync list                               # what is pinned, and what it costs
 oursync status ~/Drive/some/file           # pinned or streamed
 oursync refresh                            # pull remote changes into pinned copies
+oursync setup                              # first time: one guided run, Google console to working remote
 oursync setup --scope drive                # re-authorise so the mount can write
 oursync doctor                             # the configuration, its state, and anything wrong
 ```
@@ -68,6 +69,28 @@ oursync doctor                             # the configuration, its state, and a
 Or right-click in Nemo: **Make available offline** / **Remove local copy**. The two entries are
 gated on `Conditions=exec`, so each appears only where it applies and neither appears outside the
 mount.
+
+## What `oursync setup` does
+
+One run, in this order: check rclone against the floor; print why the step exists; walk through
+five console pages (project, consent screen, **Publish app**, Desktop client, Drive API), opening
+each with `xdg-open` when there is a display and no ssh session, otherwise printing the link;
+find `client_secret_*.json` in `xdg-user-dir DOWNLOAD` (default `~/Downloads`), newest first, and
+ask which when several; validate it (`oursync check-client`: top-level `installed`, with a
+`client_id` and a `client_secret`; a `web` client is refused because it ends in
+`redirect_uri_mismatch`); copy it to `~/.config/oursync/client_secret.json`, mode 600; append the
+remote to rclone's configuration file directly; run `rclone config reconnect --auto-confirm` for
+the consent; and finish with `rclone about` against the remote.
+
+The remote is written to the file rather than created with `rclone config create client_secret=...`
+because that puts the secret in rclone's argument list, readable by every account through `ps`.
+An encrypted rclone configuration is therefore refused rather than worked around. A failure is
+matched against `access_denied`, `redirect_uri_mismatch`, `invalid_client`, `accessNotConfigured`
+and `SERVICE_DISABLED`; each prints a sentence and the link, using the project number that is the
+digits before the hyphen of the client id. The first two bad-client cases remove the half-made
+remote and the copied file so the next run starts from the guided steps; `access_denied` and a
+disabled API offer a retry, three times. A remote left with no token (an interrupted run) is
+consented on the next run without asking for the file again.
 
 ## Two-way sync, and what decides the direction
 
