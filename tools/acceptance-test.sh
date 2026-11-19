@@ -29,6 +29,27 @@ check() { # name want got
 
 # Wait for a condition rather than sleeping a fixed time: the write-back delay is configurable and
 # a fixed sleep either wastes time or fails on a slow link.
+# Wait for Drive's copy of a path to contain a string. Separate from wait_for because the thing
+# being waited on is remote and costs a listing each time, so the poll is slower on purpose.
+wait_remote() { # seconds relative-path pattern
+    local deadline=$(( SECONDS + $1 ))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if rclone cat "$REMOTE:$2" 2>/dev/null | grep -q "$3"; then return 0; fi
+        sleep 2
+    done
+    return 1
+}
+
+# Wait for Drive to no longer have a path at all.
+wait_remote_gone() { # seconds relative-path
+    local deadline=$(( SECONDS + $1 ))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if ! rclone lsjson "$REMOTE:$2" > /dev/null 2>&1; then return 0; fi
+        sleep 2
+    done
+    return 1
+}
+
 wait_for() { # seconds command...
     local deadline=$(( SECONDS + $1 )); shift
     while [ "$SECONDS" -lt "$deadline" ]; do
@@ -181,6 +202,10 @@ sync
 wait_for 30 grep -q EDITED "$PIN_DIR/$BASE/pin me.txt"
 check "saving it reaches the local copy" \
     "EDITED-WHILE-PINNED" "$(tr -d '\r\n' < "$PIN_DIR/$BASE/pin me.txt" 2>/dev/null)"
+# The two copies do NOT arrive together, and waiting for the local one is not waiting for Drive:
+# the union writes local disk at once while the upload is held by --vfs-write-back, ten seconds by
+# default. Checking Drive straight after the local copy passed once and failed the next run.
+wait_remote 45 "$BASE/pin me.txt" EDITED
 check "saving it reaches Drive" \
     "EDITED-WHILE-PINNED" "$(rclone cat "$REMOTE:$BASE/pin me.txt" 2>/dev/null | tr -d '\r\n')"
 
@@ -250,7 +275,9 @@ printf 'DELETE-ME\n' > "$D/doomed.txt"
 wait_for 30 rclone lsjson "$REMOTE:$BASE/doomed.txt"
 pin "$D/doomed.txt"
 rm -f "$D/doomed.txt"
-sleep 3
+# Same asymmetry as a write: the local copy goes at once, Drive's goes when the deletion is sent.
+wait_for 30 test ! -e "$PIN_DIR/$BASE/doomed.txt"
+wait_remote_gone 45 "$BASE/doomed.txt"
 local_gone=$([ -e "$PIN_DIR/$BASE/doomed.txt" ] && echo present || echo gone)
 remote_gone=$(rclone lsjson "$REMOTE:$BASE/doomed.txt" > /dev/null 2>&1 && echo present || echo gone)
 check "deleting a pinned file removes the local copy" "gone" "$local_gone"
