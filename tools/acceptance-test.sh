@@ -274,6 +274,11 @@ fi
 check "and it overwrites neither copy" "CHANGED-LOCALLY:CHANGED-IN-DRIVE" \
     "$(tr -d '\r\n' < "$PIN_DIR/$BASE/conflict.txt" 2>/dev/null):$(rclone cat "$REMOTE:$BASE/conflict.txt" 2>/dev/null | tr -d '\r\n')"
 
+# A conflict is sticky by design - refresh keeps reporting it and keeps exiting non-zero until a
+# person settles it, which is correct and is why it has to be cleared here. Leaving it pinned made
+# the NEXT refresh test fail on this file and read as a fault in that test's subject.
+oursync unpin "$D/conflict.txt" > /dev/null 2>&1
+
 # A modification time in the future is real in this Drive: some uploads carry the source's own
 # timestamp, and seven files in Jonny's Drive are dated 2036. Anything resolving by "newest wins"
 # is wrong about those for a decade, so refresh must not be confused by one.
@@ -311,18 +316,39 @@ else
     bad "the mount comes back after systemctl restart"
 fi
 
-# Kill rclone outright - a crash, not a clean stop - and see whether the unit brings it back. If it
-# does not, a crashed mount leaves ~/Drive as an empty directory that writes land in silently.
+# Kill rclone outright - a crash, not a clean stop - and see whether the unit brings it back.
+#
+# `mountpoint -q` alone is NOT the test, and believing it cost a false pass here on 2026-11-18. A
+# FUSE mount whose process has been killed still has a kernel mount entry, so mountpoint answers
+# yes for a moment while every read gives ENOTCONN; and a moment later, during RestartSec, the
+# entry is gone and the mountpoint is an ordinary empty directory that `ls` answers happily. So
+# both a yes and a no can be wrong, in opposite directions, seconds apart. What is actually wanted
+# is a mount that is usable: the unit active, the mountpoint present, AND a read that works.
+# shellcheck disable=SC2329  # invoked indirectly, as the command passed to wait_for
+usable_mount() {
+    [ "$(systemctl --user is-active oursync-mount.service 2>/dev/null)" = active ] \
+        && mountpoint -q "$MOUNT" \
+        && ls "$MOUNT" > /dev/null 2>&1
+}
 rclone_pid=$(systemctl --user show oursync-mount.service -p MainPID --value 2>/dev/null)
+restarts_before=$(systemctl --user show oursync-mount.service -p NRestarts --value 2>/dev/null)
 if [ -n "$rclone_pid" ] && [ "$rclone_pid" != 0 ]; then
+    killed_at=$SECONDS
     kill -9 "$rclone_pid" 2>/dev/null
-    if wait_for 60 mountpoint -q "$MOUNT"; then
-        ok "the mount recovers from the rclone process being killed"
+    sleep 3   # past the window where the stale kernel mount entry still answers yes
+    if wait_for 90 usable_mount; then
+        took=$(( SECONDS - killed_at ))
+        restarts_after=$(systemctl --user show oursync-mount.service -p NRestarts --value 2>/dev/null)
+        if [ "$restarts_after" != "$restarts_before" ]; then
+            ok "a killed mount is restarted by systemd and usable again (${took}s, NRestarts $restarts_before -> $restarts_after)"
+        else
+            bad "a killed mount came back but NRestarts did not change ($restarts_before) - something else remounted it"
+        fi
     else
-        bad "the mount recovers from the rclone process being killed (still down after 60s)"
+        bad "a killed mount is restarted by systemd and usable again (still unusable after 90s)"
     fi
 else
-    skip "the mount recovers from being killed" "could not read MainPID"
+    skip "a killed mount is restarted by systemd" "could not read MainPID"
 fi
 
 # Whatever the last test concluded, this machine's ~/Drive is somebody's live installation and must
