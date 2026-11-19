@@ -78,6 +78,10 @@ rel_path() {
         "$MOUNT"/*) ;;
         *) die "not inside $MOUNT: $p" ;;
     esac
+    # The mount root itself matches the pattern above, because "$abs/" then equals "$MOUNT/". It is
+    # not a path under the mount: with no trailing slash to strip, the expansion below would hand
+    # back the whole absolute path, and an empty remainder would name the root of Drive.
+    [ "$abs" != "$MOUNT" ] || die "the mount root itself: $p - name a file or directory inside it"
     printf '%s' "${abs#"$MOUNT"/}"
 }
 
