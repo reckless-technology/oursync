@@ -74,9 +74,38 @@ Shell, so `shellcheck -S style` and plain POSIX-ish bash. There is no compile st
 ```sh
 ./rclone/install.sh                 # per-user install from a checkout, then runs oursync setup
 tools/rclone-floor-test.sh          # does this rclone do everything OurSync asks? (no network)
+tools/script-tests.sh               # the shipped scripts against a stub rclone (no network, no FUSE)
+tools/coverage.sh                   # the same under kcov 43, failing under the line-coverage gate
 tools/build-deb.sh                  # the package, into build/deb/
 python3 tools/make-icons.py         # only when icons/source/ changes
 ```
+
+**There are three kinds of test, and only the first two run in CI.** `tools/script-tests.sh` runs
+`rclone/oursync`, `oursync-setup`, `oursync-nemo` and `install.sh` against stubs placed first on
+`PATH` in a temporary directory: a fake `rclone` whose "Drive" is a directory and whose remote
+configuration is a file per remote, and fakes of `mountpoint`, `fusermount3`, `systemctl`,
+`notify-send` and `gtk-update-icon-cache`. `HOME` and every `XDG_*` variable point into the same
+directory. It checks the scripts' own logic and the arguments they give rclone: the rclone floor,
+which paths are accepted, the refresh rule (Drive wins, a locally newer copy is a conflict and is
+never overwritten), the mount flags, that the control password never reaches a command line, and
+what `install.sh` places. It cannot show that real rclone, a real mount or Google's consent behave as
+the stub does; `tools/rclone-floor-test.sh` checks rclone itself, and `tools/acceptance-test.sh` and
+`tools/live-write-test.sh` need a real Drive and a mount, so they are run by hand on
+`jonny-precision`. A change to a script's behaviour changes the stub's expectations in the same
+commit, and a new command comes with a case in `script-tests.sh`.
+
+**Coverage is gated at 92 % of the lines in `rclone/`**, measured with kcov 43 by
+`tools/coverage.sh` and run as the `coverage` job in `build.yml`. It was 95.8 % when the gate was set
+(2026-11-19, kcov 43, 429 lines in the four scripts). kcov is not packaged for Ubuntu 24.04, so the
+job builds the v43 tag and caches it; `coverage.sh` refuses any other version, because the gate
+depends on what kcov counts as a line. Nothing is excluded with a marker: the mount, control-port and
+consent paths all run against the stubs. What the percentage cannot show is that those paths work
+against the real thing. The lines that stay uncovered are `case` patterns and the initialiser of the
+`flags` array, which kcov does not report as executed even when they are, and the last two lines of
+the `setup` dispatch, which `exec` replaces before kcov records them. kcov leaves a script that never
+ran out of its report, so `coverage.sh` also fails if any script in `rclone/` is missing from it. The
+report is the `oursync-coverage` artifact of the run. To run it locally, build kcov v43 (cmake, g++,
+libdw-dev, libelf-dev, libcurl4-openssl-dev, binutils-dev, libssl-dev, zlib1g-dev) and put it on `PATH`.
 
 **The icon is Jonny's artwork, and the committed PNGs are the deliverable.** `icons/source/` holds
 what he supplied — a dark circle on white — and `tools/make-icons.py` finds the circle, cuts it out
@@ -202,7 +231,7 @@ bugs would have read as "1.60 is too old" had it been run there first.
 
 The repository is public, so every job runs on a **GitHub-hosted** image and none of this competes
 for the organisation's self-hosted machines. `build.yml` is shellcheck, the package (built,
-lintian'd, installed, exercised, removed) and the rclone floor test against both the version apt
-ships and the current one. `release.yml` follows the house pattern: a tag `vMAJOR.MINOR` or a
+lintian'd, installed, exercised, removed), the rclone floor test against both the version apt
+ships and the current one, and the coverage job above. `release.yml` follows the house pattern: a tag `vMAJOR.MINOR` or a
 dispatch builds `MAJOR.MINOR.BUILD` from `tools/version.sh` and leaves a **draft** release with the
 `.deb` and its checksum. Publishing it is Jonny's step, as everywhere else in the organisation.
