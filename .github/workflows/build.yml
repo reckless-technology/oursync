@@ -69,6 +69,54 @@ jobs:
           systemd-analyze verify --user build/check/oursync-mount.service || true
           test -s build/check/10_oursync-pin.nemo_action
 
+  coverage:
+    name: line coverage of rclone/
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      # kcov is not packaged for Ubuntu 24.04, so it is built from the pinned tag and the build is
+      # cached under that tag. The gate in tools/coverage.sh is calibrated on this exact version,
+      # because kcov decides what counts as a line, and tools/coverage.sh refuses any other.
+      - name: Restore the kcov build
+        id: kcov-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/kcov-install
+          key: kcov-v43-ubuntu-24.04
+      # The development packages rather than only the run-time libraries, so that this step does not
+      # depend on knowing which t64-renamed library names Ubuntu 24.04 gave them.
+      - name: Install kcov's libraries, and what builds it
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ make pkg-config libdw-dev libelf-dev libcurl4-openssl-dev binutils-dev \
+            libssl-dev zlib1g-dev python3
+      - name: Build kcov v43
+        if: steps.kcov-cache.outputs.cache-hit != 'true'
+        env:
+          KCOV_VERSION: "43"
+        run: |
+          set -euo pipefail
+          src=$(mktemp -d)
+          curl -fsSL "https://github.com/SimonKagstrom/kcov/archive/refs/tags/v${KCOV_VERSION}.tar.gz" \
+            | tar -xz -C "$src" --strip-components=1
+          cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/kcov-install"
+          cmake --build "$src/build" -j"$(nproc)"
+          cmake --install "$src/build"
+      - name: Measure, and fail under the gate
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/kcov-install/bin:$PATH"
+          kcov --version
+          tools/coverage.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oursync-coverage
+          path: build/coverage/script-tests.sh
+          retention-days: 14
+
   package:
     name: the .deb
     runs-on: ubuntu-24.04
