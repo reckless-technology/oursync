@@ -34,7 +34,10 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
 - `oursync pin / unpin / refresh / list / status / mount / unmount / setup / doctor / version`, a
   man page, and two Nemo entries gated so each appears only where it applies.
 - `oursync setup`: the per-user half a package cannot do, including the one-time Google Cloud
-  walkthrough and the scope upgrade (`--scope drive`), which changes the configured scope without
+  walkthrough (one run: it opens each console page, finds the downloaded client JSON, refuses a
+  Web client, writes the remote straight into rclone's configuration so the secret never appears
+  in `ps`, runs the consent, and checks the remote with `rclone about`, explaining the usual
+  failures with project-specific links) and the scope upgrade (`--scope drive`), which changes the configured scope without
   touching the existing token and only then replaces it.
 - A `.deb`: `debian/`, built by `tools/build-deb.sh`, with the version coming from the git tags so
   nothing in the tree is edited to release.
@@ -104,22 +107,29 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
 - **A Cloud project must be published to production**, which is a step in the walkthrough rather
   than engineering, but it is the difference between a mount that keeps working and one that asks
   for consent every seven days. Google ties that to the consent screen carrying no logo. Jonny's
-  own project was published on 2026-11-18 and its logo removed for exactly this reason.
+  own project was published on 2026-11-18 and its logo removed for exactly this reason. Since
+  2026-11-19 setup has the user publish *before* the client exists and consent happens, which
+  drops the test-user step. Google's documentation says production is open to any account and
+  that Testing expires the token; it does not say publishing before a client exists is allowed,
+  and that ordering is unconfirmed against a real fresh project (see the PR that introduced it).
+  `oursync doctor` cannot read the publishing status, and says so rather than guess.
 - **Shared drives and "shared with me"**, which are configuration rather than design, and the
   largest remaining gap after writes. [parity.md](parity.md) is the full audit against Drive for
   desktop, with how each row was established.
 - **A conflict that a person can act on.** Today a conflict is a message in the journal and a
   non-zero exit from the timer. Drive for desktop makes a conflict copy; the naming for that is
   already specified in [design.md](design.md) §9.
-- `oursync doctor` could check reachability and token expiry, not only configuration.
+- `oursync doctor` could check reachability and token expiry, not only configuration. It now
+  reports the client's project and file type, but not the publishing status, which nothing it
+  can ask exposes.
 
 ## Jonny's call
 
 1. **Publishing a release.** The machinery leaves a draft; putting it in front of the public is a
    human step, as everywhere else in the organisation.
 2. **Whether the Google onboarding wall is acceptable** for the people he wants to share this with.
-   Every user must create their own Cloud project and OAuth client — roughly ten minutes of console
-   clicking. It cannot be removed:
+   Every user must create their own Cloud project and OAuth client — five console pages, each opened for
+   them by `oursync setup`. It cannot be removed:
 
    - Seeing a whole Drive needs Google's **restricted** `drive` scope.
    - An application that ships its own client ID with a restricted scope needs OAuth verification
@@ -127,7 +137,7 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
    - A client from the user's own Cloud project falls under Google's documented personal-use
      exemption: no verification, no assessment, and a per-project quota nobody else shares.
 
-   So `oursync setup` makes the wall shorter and the README says so before anyone installs, but the
+   So `oursync setup` makes the wall as short as it can (one run, no re-run, no file to move by hand) and the README says so before anyone installs, but the
    wall stays. It is the one thing that decides whether OurSync is shareable in a friendly way or
    only to people who will tolerate that.
 

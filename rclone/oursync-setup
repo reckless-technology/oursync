@@ -29,6 +29,7 @@ CACHE_DIR="${CACHE_DIR:-$HOME/.cache/oursync}"
 # front of somebody who only reinstalled the scripts. Changing the scope is an explicit --scope.
 SCOPE=""
 CLIENT_SECRET=""
+CLIENT_SECRET_GIVEN=no
 FORCE_REAUTH=no
 
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
@@ -43,15 +44,17 @@ $PROG - create or re-authorise OurSync's per-user configuration
                                  can write; an existing one keeps the scope it has unless
                                  this says otherwise, so a re-run never springs a consent
                                  screen on you
-  --client-secret PATH           the OAuth client JSON downloaded from Google Cloud
-                                 (default: $CONF_DIR/client_secret.json)
+  --client-secret PATH           the Desktop app OAuth client JSON from Google Cloud. Without it,
+                                 setup uses $CONF_DIR/client_secret.json if there is one, and
+                                 otherwise walks you through making one and finds the download
+                                 in your Downloads folder itself
   --remote NAME                  name of the Drive remote (default: $REMOTE)
   --mount DIR                    where Drive appears (default: $MOUNT)
   --force-reauth                 re-run the Google consent even if the scope already matches
   --help
 
-Run it with no options the first time. Run it again with --scope drive to turn a read-only
-installation into one that can write.
+Run it with no options the first time: one run takes you from nothing to a working remote.
+Run it again with --scope drive to turn a read-only installation into one that can write.
 
 rclone asks whether to use a web browser for the consent. Over ssh, answer Y anyway and tunnel
 the port it listens on from the machine that has the browser:
@@ -67,8 +70,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --scope) SCOPE="${2:-}"; shift 2 ;;
         --scope=*) SCOPE="${1#*=}"; shift ;;
-        --client-secret) CLIENT_SECRET="${2:-}"; shift 2 ;;
-        --client-secret=*) CLIENT_SECRET="${1#*=}"; shift ;;
+        --client-secret) CLIENT_SECRET="${2:-}"; [ -n "$CLIENT_SECRET" ] && CLIENT_SECRET_GIVEN=yes; shift 2 ;;
+        --client-secret=*) CLIENT_SECRET="${1#*=}"; [ -n "$CLIENT_SECRET" ] && CLIENT_SECRET_GIVEN=yes; shift ;;
         --remote) REMOTE="${2:-}"; shift 2 ;;
         --remote=*) REMOTE="${1#*=}"; shift ;;
         --mount) MOUNT="${2:-}"; shift 2 ;;
@@ -133,7 +136,25 @@ if [ -z "$SCOPE" ]; then
     fi
 fi
 
-authorise_notes() {
+read_json_field() {
+    sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' -- "$2" | head -1
+}
+
+# The Cloud project number behind the remote's client, for links that name the user's own project.
+remote_project() {
+    [ -n "$oursync_bin" ] || return 0
+    "$oursync_bin" client-project "$(rclone config show "$REMOTE" 2>/dev/null | sed -n 's/^client_id = //p')"
+}
+
+CONSOLE=https://console.cloud.google.com
+# The Cloud project's number, known once there is a client id to read it from. Until then the
+# console links carry no ?project= and rely on the console remembering the project just made.
+PROJECT=""
+CLIENT_ID=""
+CLIENT_SECRET_VALUE=""
+PICKED=""
+
+intro_notes() {
     cat <<'NOTES'
 OurSync ships no OAuth client ID and never will. Seeing a whole Drive needs Google's restricted
 "drive" scope, and an application distributing its own client ID with that scope needs OAuth
@@ -141,66 +162,280 @@ verification plus an annually renewed third-party security assessment. A client 
 Google Cloud project falls under Google's personal-use exemption instead: no verification, no
 assessment, and an API quota nobody else is sharing.
 
-Once, in your browser. Each page after the first wants your new project selected, which it will
-be once you have created it:
-
-  1. console.cloud.google.com/projectcreate - give it any name, Create.
-  2. console.cloud.google.com/apis/library/drive.googleapis.com - Enable.
-  3. console.cloud.google.com/auth/overview - "Get started". What used to be called the OAuth
-     consent screen is now Google Auth Platform: app name, your own email as support contact,
-     Audience "External", a contact email, agree.
-  4. console.cloud.google.com/auth/audience - under Test users, "Add users", your own Google
-     account. Without this, consent fails with access_denied.
-  5. console.cloud.google.com/auth/clients/create - Application type "Desktop app", Create, then
-     "Download JSON" from the client you just made.
-
-Then save that file as:
-
-NOTES
-    printf '  %s\n\n' "$CLIENT_SECRET"
-    cat <<'NOTES'
-You will see an "unverified app" warning when you consent. That is expected: the app is yours and
-you have not paid Google to verify it.
-
-A new project starts in "Testing", where Google expires the refresh token after seven days - your
-mount stops authenticating about a week in. Set the publishing status to "In production" at
-console.cloud.google.com/auth/overview to stop that. It needs no verification and no review.
-
-One thing will block that: do not upload an App logo on the Branding page. Google requires an app
-carrying a logo to be submitted for verification unless it stays in "Testing", so the logo and the
-seven-day expiry come as a pair. Leave it blank.
+Five short steps in your browser, then OurSync does the rest in this one run. Each step opens its
+page (or prints the link, over ssh or with no display) and waits for you to press Enter.
 NOTES
 }
 
-read_json_field() {
-    sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' -- "$2" | head -1
+# A console link for the user's own project once it is known.
+project_url() { # path
+    printf '%s/%s%s' "$CONSOLE" "$1" "${PROJECT:+?project=$PROJECT}"
 }
+enable_api_url() {
+    printf '%s/flows/enableapi?apiid=drive.googleapis.com%s' "$CONSOLE" "${PROJECT:+&project=$PROJECT}"
+}
+
+open_url() {
+    printf '    %s\n' "$1" >&2
+    if [ -z "${SSH_CONNECTION:-}" ] && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; } \
+        && command -v xdg-open > /dev/null; then
+        (xdg-open "$1" > /dev/null 2>&1 &)
+    fi
+}
+
+# Reads a line into REPLY. End of input is fatal: there is nobody to answer, and looping on it
+# would never end.
+pause() { # prompt
+    printf '%s' "$1" >&2
+    IFS= read -r REPLY || die "no answer - the guided steps need a terminal (or pass --client-secret PATH)"
+}
+
+guide_step() { # number title url text
+    printf '\nStep %s of 5 - %s\n' "$1" "$2"
+    printf '%s\n' "$4"
+    open_url "$3"
+    pause "  Press Enter when done. "
+}
+
+downloads_dir() {
+    local dir=""
+    command -v xdg-user-dir > /dev/null && dir=$(xdg-user-dir DOWNLOAD 2>/dev/null)
+    case "$dir" in ""|"$HOME"|"$HOME/") dir="$HOME/Downloads" ;; esac
+    printf '%s\n' "$dir"
+}
+
+oursync_client() { # file: the output of `oursync check-client`
+    [ -n "$oursync_bin" ] || die "cannot find the oursync program to check the client file with"
+    "$oursync_bin" check-client "$1"
+}
+info_field() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
+
+# Is this a usable Desktop app client? On success sets CLIENT_ID, CLIENT_SECRET_VALUE and PROJECT.
+# On failure says exactly what is wrong and returns 1; the caller decides whether that is fatal.
+validate_client() { # file
+    local info kind
+    [ -r "$1" ] || { note "cannot read $1"; return 1; }
+    info=$(oursync_client "$1") || return 1
+    kind=$(info_field "$info" kind)
+    CLIENT_ID=$(info_field "$info" client_id)
+    PROJECT=$(info_field "$info" project)
+    case "$kind" in
+        desktop) ;;
+        web)
+            note "$1 is a Web application client. OurSync needs a Desktop app one: a Web client has no"
+            note "loopback redirect, so Google's consent would end in redirect_uri_mismatch."
+            note "Create a new client with Application type 'Desktop app' and download its JSON:"
+            note "    $(project_url auth/clients/create)"
+            return 1 ;;
+        *)
+            note "$1 is not a Google OAuth client file (no top-level \"installed\" object)."
+            note "Download the JSON of a Desktop app client from:"
+            note "    $(project_url auth/clients)"
+            return 1 ;;
+    esac
+    CLIENT_SECRET_VALUE=$(read_json_field client_secret "$1")
+    if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET_VALUE" ]; then
+        note "$1 has no client_id/client_secret - download the Desktop app client JSON again."
+        return 1
+    fi
+}
+
+# Choose among the client files in Downloads, newest first, or take a path typed by hand. Sets PICKED.
+pick_client() {
+    local dir files f index
+    dir=$(downloads_dir)
+    while :; do
+        files=()
+        while IFS= read -r f; do
+            [ -n "$f" ] && files+=("$f")
+        done < <(find "$dir" -maxdepth 1 -type f -name 'client_secret*.json' -printf '%T@ %p\n' 2>/dev/null \
+                     | sort -rn | cut -d' ' -f2-)
+        if [ "${#files[@]}" -eq 0 ]; then
+            note "  No client_secret_*.json in $dir yet."
+            pause "  Press Enter to look again, or type the file's path: "
+            REPLY=${REPLY/#\~/$HOME}
+            if [ -z "$REPLY" ]; then continue; fi
+            if [ -r "$REPLY" ]; then PICKED=$REPLY; return 0; fi
+            note "  cannot read '$REPLY'"
+            continue
+        fi
+        index=0
+        for f in "${files[@]}"; do
+            index=$((index + 1))
+            printf '  %s) %s   (%s)\n' "$index" "${f##*/}" "$(date -r "$f" '+%Y-%m-%d %H:%M')" >&2
+        done
+        pause "  Use which? Enter for 1, another number, or type a path: "
+        REPLY=${REPLY/#\~/$HOME}
+        case "$REPLY" in
+            "") PICKED=${files[0]}; return 0 ;;
+            *[!0-9]*) if [ -r "$REPLY" ]; then PICKED=$REPLY; return 0; fi
+                      note "  cannot read '$REPLY'" ;;
+            *) if [ "$REPLY" -ge 1 ] && [ "$REPLY" -le "${#files[@]}" ]; then
+                   PICKED=${files[$((REPLY - 1))]}; return 0
+               fi
+               note "  there is no number $REPLY" ;;
+        esac
+    done
+}
+
+# The guided path: the console steps, then the downloaded file. Sets PICKED to a valid client.
+guided_client() {
+    intro_notes
+    guide_step 1 "a project" "$CONSOLE/projectcreate" "  Give it any name and click Create. Wait for the notification, and check the new project is the
+  one selected in the bar at the top."
+    guide_step 2 "the consent screen" "$CONSOLE/auth/overview" "  Click \"Get started\". App name: anything. Support email: yours. Audience: External. Contact
+  email: yours. Agree, then Create."
+    guide_step 3 "publish it, which is what stops the seven-day expiry" "$CONSOLE/auth/audience" "  Click \"Publish app\", then Confirm. No verification is needed, and it removes the need to add
+  yourself as a test user. Do NOT add a logo anywhere: an app with one has to be verified."
+    guide_step 4 "a Desktop client" "$CONSOLE/auth/clients/create" "  Application type \"Desktop app\", any name, Create. In the box that appears, click \"Download JSON\".
+  It lands in your Downloads folder and OurSync will find it there."
+    printf '\nLooking for the file you downloaded.\n' >&2
+    while :; do
+        pick_client
+        validate_client "$PICKED" && break
+        note "  Pick another, or download it again."
+    done
+    guide_step 5 "the Drive API" "$(enable_api_url)" "  Click Enable (project ${PROJECT:-?}, the one in your file). If it says \"API enabled\" already,
+  there is nothing to do."
+}
+
+# Copy the client where setup keeps it, private. The source stays where it was found.
+install_client() { # source
+    local dest="$CONF_DIR/client_secret.json"
+    chmod 600 -- "$1" 2>/dev/null || true
+    if [ "$(readlink -f -- "$1")" != "$(readlink -f -- "$dest")" ]; then
+        (umask 077; cp -- "$1" "$dest") || die "could not copy the client file to $dest"
+    fi
+    chmod 600 -- "$dest"
+}
+
+# The remote is written into rclone's configuration file directly, not with `rclone config create
+# ... client_secret=...`, because that puts the secret in rclone's argument list and every account
+# on the machine can read that through ps. The consent itself is `config reconnect`, which takes
+# everything from the file.
+write_remote() { # name client_id client_secret scope
+    local path
+    path=$(rclone config file 2>/dev/null | tail -1)
+    [ -n "$path" ] || die "cannot find out where rclone keeps its configuration"
+    if [ -e "$path" ] && head -n 5 -- "$path" | grep -q 'RCLONE_ENCRYPT_V0'; then
+        die "$path is encrypted, and OurSync will not put a client secret on a command line instead. Decrypt it (rclone config encryption remove) for this setup."
+    fi
+    mkdir -p -- "$(dirname -- "$path")"
+    (umask 077; printf '\n[%s]\ntype = drive\nclient_id = %s\nclient_secret = %s\nscope = %s\n' \
+        "$1" "$2" "$3" "$4" >> "$path") || die "could not write $path"
+}
+
+# One plain sentence and the exact link for each way the first consent or call commonly fails.
+# Prints nothing and returns 1 for text it does not recognise.
+explain_failure() { # text
+    case "$1" in
+        *access_denied*)
+            note "Google refused: the app is not published and you are not a listed test user."
+            note "Click \"Publish app\" at $(project_url auth/audience) and try again. (Adding yourself as a"
+            note "test user also works, but Google then expires the token after seven days.)" ;;
+        *redirect_uri_mismatch*)
+            note "Google refused the redirect: that client is not a Desktop app."
+            note "Create a Desktop app client at $(project_url auth/clients/create)." ;;
+        *invalid_client*)
+            note "Google does not recognise the client: it was deleted, or its secret is wrong."
+            note "Create a Desktop app client at $(project_url auth/clients/create)." ;;
+        *accessNotConfigured*|*SERVICE_DISABLED*|*"has not been used in project"*)
+            note "The Google Drive API is not enabled for this project."
+            note "Enable it at $(enable_api_url) and try again." ;;
+        *) return 1 ;;
+    esac
+}
+
+# Run the browser consent, and diagnose what goes wrong. Three tries, because the commonest
+# failures are fixed in the browser and then simply tried again.
+consent() {
+    local attempt=0 log="$CONF_DIR/.consent.log" status
+    while :; do
+        attempt=$((attempt + 1))
+        rclone config reconnect "$REMOTE:" --auto-confirm 2>&1 | tee "$log" >&2
+        status=${PIPESTATUS[0]}
+        if [ "$status" -eq 0 ]; then rm -f -- "$log"; return 0; fi
+        if ! explain_failure "$(cat -- "$log")"; then
+            rm -f -- "$log"
+            return 1
+        fi
+        # A wrong client cannot be fixed by retrying with the same one: take it out, so the next
+        # run starts from the guided steps instead of reusing it.
+        case "$(cat -- "$log")" in
+            *redirect_uri_mismatch*|*invalid_client*)
+                rm -f -- "$log" "$CONF_DIR/client_secret.json"
+                rclone config delete "$REMOTE" > /dev/null 2>&1 || true
+                note "Removed that client from OurSync's setup. Run '$PROG' again once you have a new one."
+                return 1 ;;
+        esac
+        rm -f -- "$log"
+        [ "$attempt" -lt 3 ] || return 1
+        pause "Press Enter to try again. "
+    done
+}
+
+# One cheap call, to find out now rather than at first mount that the remote works.
+verify_remote() {
+    local attempt=0 output
+    while :; do
+        attempt=$((attempt + 1))
+        if output=$(rclone about "$REMOTE:" 2>&1); then
+            note "Google Drive answered: $REMOTE works."
+            return 0
+        fi
+        explain_failure "$output" || { note "$output"; return 1; }
+        [ "$attempt" -lt 3 ] || return 1
+        pause "Press Enter to check again. "
+    done
+}
+
+token_present() { rclone config show "$REMOTE" 2>/dev/null | grep -q '^token = '; }
+
+needs_verify=no
 
 if [ -z "$existing_type" ]; then
     rule
     note "No rclone remote called '$REMOTE' yet."
-    rule
-    authorise_notes
-    [ -r "$CLIENT_SECRET" ] || die "no OAuth client JSON at $CLIENT_SECRET - follow the steps above, then run '$PROG' again"
-
-    client_id=$(read_json_field client_id "$CLIENT_SECRET")
-    client_secret=$(read_json_field client_secret "$CLIENT_SECRET")
-    if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
-        die "$CLIENT_SECRET has no client_id/client_secret - download the Desktop app client JSON again"
+    if [ "$CLIENT_SECRET_GIVEN" = yes ]; then
+        [ -r "$CLIENT_SECRET" ] || die "no OAuth client JSON at $CLIENT_SECRET"
+        validate_client "$CLIENT_SECRET" || die "that client file will not do"
+        PICKED=$CLIENT_SECRET
+    elif [ -r "$CLIENT_SECRET" ]; then
+        note "Using the client file already at $CLIENT_SECRET."
+        validate_client "$CLIENT_SECRET" || die "that client file will not do"
+        PICKED=$CLIENT_SECRET
+    else
+        guided_client
+        pick_is_download=yes
+        # Only ever offer to delete a file that was sitting in Downloads, never one typed in from elsewhere.
+        case "$PICKED" in "$(downloads_dir)"/*) ;; *) pick_is_download=no ;; esac
     fi
-    chmod 600 -- "$CLIENT_SECRET" 2>/dev/null || true
-
-    note "Creating remote '$REMOTE' with scope '$SCOPE'. rclone will ask about the browser."
-    rclone config create "$REMOTE" drive \
-        client_id="$client_id" client_secret="$client_secret" scope="$SCOPE" \
-        || die "authorising '$REMOTE' failed"
+    install_client "$PICKED"
+    write_remote "$REMOTE" "$CLIENT_ID" "$CLIENT_SECRET_VALUE" "$SCOPE"
+    note "Added remote '$REMOTE' with scope '$SCOPE'. Next is Google's consent, in your browser."
+    note "You will see an \"unverified app\" warning: that is expected, the app is yours. Choose"
+    note "Advanced, then \"Go to ... (unsafe)\"."
+    consent || die "authorising '$REMOTE' failed"
     note "created remote '$REMOTE'"
+    needs_verify=yes
+    if [ "${pick_is_download:-no}" = yes ] && [ "$PICKED" != "$CONF_DIR/client_secret.json" ]; then
+        pause "Delete the copy of the client file in Downloads, now it is kept privately? [Y/n] "
+        case "$REPLY" in
+            n*|N*) ;;
+            *) rm -f -- "$PICKED" ;;
+        esac
+    fi
 
-elif [ "$existing_scope" != "$SCOPE" ] || [ "$FORCE_REAUTH" = yes ]; then
+elif [ "$existing_scope" != "$SCOPE" ] || [ "$FORCE_REAUTH" = yes ] || ! token_present; then
     rule
-    note "Remote '$REMOTE' has scope '${existing_scope:-unset}'; re-authorising it for '$SCOPE'."
-    note "Google will ask for consent again, because the permissions being asked for have changed."
+    if token_present || [ "$FORCE_REAUTH" = yes ] || [ "$existing_scope" != "$SCOPE" ]; then
+        note "Remote '$REMOTE' has scope '${existing_scope:-unset}'; re-authorising it for '$SCOPE'."
+        note "Google will ask for consent again, because the permissions being asked for have changed."
+    else
+        note "Remote '$REMOTE' exists but has no token - an earlier setup stopped before the consent."
+    fi
     rule
+    PROJECT=$(remote_project)
     # Two steps, and both are needed. The first changes only the configured scope:
     # config_refresh_token=false keeps the existing token, so a failure here leaves a working
     # remote rather than an unusable one. The second replaces the token, which is the only way a
@@ -209,10 +444,16 @@ elif [ "$existing_scope" != "$SCOPE" ] || [ "$FORCE_REAUTH" = yes ]; then
         > /dev/null 2>&1
     [ "$(rclone config show "$REMOTE" | sed -n 's/^scope = //p')" = "$SCOPE" ] \
         || die "could not set scope '$SCOPE' on '$REMOTE'"
-    rclone config reconnect "$REMOTE:" || die "re-authorising '$REMOTE' failed"
+    consent || die "re-authorising '$REMOTE' failed"
     note "re-authorised '$REMOTE' with scope '$SCOPE'"
+    needs_verify=yes
 else
     note "remote '$REMOTE' already has scope '$SCOPE'"
+fi
+
+if [ "$needs_verify" = yes ]; then
+    PROJECT=$(remote_project)
+    verify_remote || die "'$REMOTE' was authorised but Google Drive would not answer - see above. Run '$PROG' again to retry"
 fi
 
 # ---------------------------------------------------------------------------------------------

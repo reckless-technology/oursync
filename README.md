@@ -65,7 +65,7 @@ fill a fast downlink. Measurement killed it — see [below](#how-it-got-here).
 ## Before you install: the Google setup, which cannot be avoided
 
 **OurSync ships no OAuth client ID, and never will.** You create one, once, in your own Google
-Cloud project. It is about ten minutes of clicking in a console, and it is not optional:
+Cloud project, and it is not optional:
 
 - Seeing your whole Drive needs Google's **restricted** `drive` scope.
 - An application that ships its own client ID with a restricted scope needs OAuth verification
@@ -75,15 +75,29 @@ Cloud project. It is about ten minutes of clicking in a console, and it is not o
   exemption: no verification, no assessment, and an API quota nobody else is sharing.
 
 So the wall is real, and the trade is a good one: your credential, your project, your quota.
-`oursync setup` walks you through it and takes the `client_secret.json` you download. You will
-click through an "unverified app" warning when you consent, because the app is yours and you have
-not paid Google to verify it.
+`oursync setup` makes it as short as it can be. It is one run: five pages of Google's console, each
+opened for you (or its link printed, over ssh or with no display), with a line or two on what to
+click, and Enter to move on.
 
-Set that project's publishing status to **In production** once it works. A project left in
-Google's "Testing" status expires its refresh token after seven days, and the mount stops
-authenticating. Leave the consent screen's App logo blank while you are at it: Google requires an
-app carrying a logo to go through verification unless it stays in "Testing", so the logo and the
-seven-day expiry come as a pair.
+1. Create a project.
+2. Set up the consent screen: "Get started", audience **External**.
+3. Click **Publish app**. This is what keeps the token alive: a project left in Google's "Testing"
+   status expires its refresh token after seven days. It needs no verification, and it means you
+   do not have to add yourself as a test user. Add no logo anywhere: an app carrying one has to be
+   verified.
+4. Create a **Desktop app** client and click Download JSON. `oursync setup` finds the file in your
+   Downloads folder itself, checks it is a Desktop client (a Web one fails later with
+   `redirect_uri_mismatch`, so it is refused now), keeps a private copy and offers to delete the
+   download.
+5. Enable the Drive API, from a link already pointing at your project.
+
+Setup then opens Google's consent in your browser, and asks Drive one question to make sure the
+remote works before it says it is done. You will click through an "unverified app" warning there:
+the app is yours and you have not paid Google to verify it. Choose Advanced, then "Go to ...".
+If something goes wrong, setup says which of the usual causes it is (the API not enabled, the app
+not published, the wrong kind of client) and gives the link that fixes it. With
+`--client-secret PATH`, or a file already at `~/.config/oursync/client_secret.json`, the guided
+steps are skipped.
 
 ## Install
 
@@ -98,8 +112,8 @@ systemctl --user enable --now oursync-refresh.timer  # keep pinned files up to d
 oursync doctor                                       # check it over
 ```
 
-`oursync setup` creates the per-user parts a package cannot: the Drive remote, the union over it,
-the configuration file and the pin directory. A `.deb` installs once for a machine, while a Drive
+`oursync setup` creates the per-user parts a package cannot: the Drive remote with the client you
+made above, the union over it, the configuration file and the pin directory. A `.deb` installs once for a machine, while a Drive
 token belongs to a person, so this is the half each user runs for themselves. It is safe to re-run
 and will not overwrite a configuration file you already have. `oursync setup --scope drive.readonly`
 installs a read-only Drive instead, if that is what you want.

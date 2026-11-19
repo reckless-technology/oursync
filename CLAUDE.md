@@ -63,7 +63,12 @@ is sound and still answers questions. Its architecture is history.
   token with a writable mount fails part-way through a save; the derivation makes it fail at once.
 - **Credentials never go on a command line.** `--rc-pass` published the mount control password to
   every account on the machine through `ps` and `/proc/*/cmdline`; it goes through `RCLONE_RC_PASS`
-  instead, which `/proc/*/environ` restricts to the owner.
+  instead, which `/proc/*/environ` restricts to the owner. **The same goes for the OAuth
+  `client_secret`**: `rclone config create ... client_secret=...` puts it in rclone's argv, so
+  `oursync setup` appends the remote to rclone's configuration file itself (found with `rclone
+  config file`) and runs only `rclone config reconnect`, which takes everything from the file.
+  Checked against real rclone 1.76.0, 2026-11-19: no secret in any rclone argument. An encrypted
+  configuration is refused, not worked around.
 - **The Go foundation is gone**, deleted when the repository went public. Its `Makefile` built
   `./cmd/oursyncd`, which never existed.
 
@@ -80,11 +85,20 @@ tools/build-deb.sh                  # the package, into build/deb/
 python3 tools/make-icons.py         # only when icons/source/ changes
 ```
 
+**`oursync setup` is one guided run** (2026-11-19): it opens five console pages with `xdg-open`
+(only with a display and no `SSH_CONNECTION`), finds the downloaded `client_secret_*.json` in
+`xdg-user-dir DOWNLOAD`, validates it with `oursync check-client` (Desktop `installed` only; a
+`web` client is refused), consents, and checks the remote with `rclone about`. The user publishes
+the app ("In production") *before* the client exists, so there is no test-user step; whether
+Google allows that ordering before any client exists is **unconfirmed against a real project**,
+and the access_denied diagnosis tells the user to publish or add themselves as a test user. The
+sequence is only proven against the stub: a real consent needs Jonny's click-through.
+
 **There are three kinds of test, and only the first two run in CI.** `tools/script-tests.sh` runs
 `rclone/oursync`, `oursync-setup`, `oursync-nemo` and `install.sh` against stubs placed first on
 `PATH` in a temporary directory: a fake `rclone` whose "Drive" is a directory and whose remote
-configuration is a file per remote, and fakes of `mountpoint`, `fusermount3`, `systemctl`,
-`notify-send` and `gtk-update-icon-cache`. `HOME` and every `XDG_*` variable point into the same
+configuration is one INI file (`rclone config file` says where), and fakes of `mountpoint`, `fusermount3`, `systemctl`,
+`notify-send`, `xdg-open`, `xdg-user-dir` and `gtk-update-icon-cache`. `HOME` and every `XDG_*` variable point into the same
 directory. It checks the scripts' own logic and the arguments they give rclone: the rclone floor,
 which paths are accepted, the refresh rule (Drive wins, a locally newer copy is a conflict and is
 never overwritten), the mount flags, that the control password never reaches a command line, and
@@ -96,7 +110,7 @@ commit, and a new command comes with a case in `script-tests.sh`.
 
 **Coverage is gated at 92 % of the lines in `rclone/`**, measured with kcov 43 by
 `tools/coverage.sh` and run as the `coverage` job in `build.yml`. It was 95.8 % when the gate was set
-(2026-11-19, kcov 43, 430 lines in the four scripts). kcov is not packaged for Ubuntu 24.04, so the
+(2026-11-19, kcov 43, 430 lines in the four scripts; 95.77 % of 614 lines after the guided setup). kcov is not packaged for Ubuntu 24.04, so the
 job builds the v43 tag and caches it; `coverage.sh` refuses any other version, because the gate
 depends on what kcov counts as a line. Nothing is excluded with a marker: the mount, control-port and
 consent paths all run against the stubs. What the percentage cannot show is that those paths work
