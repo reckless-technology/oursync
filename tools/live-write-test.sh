@@ -51,21 +51,43 @@ wait_for() {
 }
 in_drive() { rclone lsjson "$REMOTE:$1" --log-level ERROR > /dev/null 2>&1; }
 gone_from_drive() { ! in_drive "$1"; }
+# True when the mount's listing of its root no longer shows the folder.
+gone_from_mount() {
+    local entry
+    for entry in "$MOUNT"/*; do
+        [ "$entry" = "$MOUNT/$FOLDER" ] && return 1
+    done
+    return 0
+}
 
 cleanup() {
     if [ "$KEEP" = yes ]; then
         printf '\nkept %s\n' "$DIR"
         return
     fi
-    # Only ever this folder, by the name built above, and only through the remote.
+    # Only ever this folder, by the name built above.
     case "$FOLDER" in
-        "OurSync write test "*) rclone purge "$REMOTE:$FOLDER" --log-level ERROR 2>/dev/null || true ;;
-        *) printf 'refusing to purge an unexpected folder name: %s\n' "$FOLDER" >&2 ;;
+        "OurSync write test "*)
+            # Through the mount first, so the mount's own directory cache learns of the removal at
+            # once (a purge against the remote alone leaves ~/Drive listing the folder until
+            # --dir-cache-time or the poll catches up), then against the remote as the backstop for
+            # anything the mount could not remove.
+            rm -rf -- "${MOUNT:?}/$FOLDER" 2>/dev/null || true
+            rclone purge "$REMOTE:$FOLDER" --log-level ERROR 2>/dev/null || true ;;
+        *) printf 'refusing to purge an unexpected folder name: %s\n' "$FOLDER" >&2; return ;;
     esac
     # ${PIN_DIR:?} rather than $PIN_DIR: an empty PIN_DIR would make this rm -rf /<folder>.
     rm -rf -- "${PIN_DIR:?}/$FOLDER" 2>/dev/null || true
     "$OURSYNC" refresh --quiet > /dev/null 2>&1 || true
-    printf '\nremoved %s\n' "$FOLDER"
+    # "removed" is only printed once both Drive and the mount agree. Drive is checked first; the
+    # mount's listing then gets up to 90 s (it runs with --poll-interval 1m).
+    if ! wait_for "Drive to drop the folder" 30 gone_from_drive "$FOLDER"; then
+        printf '\nDrive still has %s; remove it by hand.\n' "$FOLDER"
+    elif wait_for "the mount to stop listing the folder" 90 gone_from_mount; then
+        printf '\nremoved %s\n' "$FOLDER"
+    else
+        printf '\nDrive no longer has %s, but the mount still lists it until its directory cache refreshes.\n' "$FOLDER"
+    fi
 }
 
 printf 'mount   %s\n' "$MOUNT"
