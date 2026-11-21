@@ -832,7 +832,7 @@ expect_has "and setup carries on to the missing client file" "$ERR" "no OAuth cl
 mkdir -p "$W/withbin"; ln -s "$OURSYNC" "$W/withbin/oursync"
 PATH="$W/withbin:$STUBS:$BARE" run "$W/alone/oursync-setup" --client-secret=
 expect_lacks "an oursync on the PATH is used instead" "$ERR" "WARNING: cannot find"
-expect_has "and an empty client path falls back to the guided steps" "$OUT" "Step 1 of 5"
+expect_has "and an empty client path falls back to the guided steps" "$OUT" "Step 1 of 6"
 # With no oursync to ask, a client file cannot be checked, and that is said rather than skipped.
 client_file "$W/c.json" installed 1-a s
 run "$W/alone/oursync-setup" --client-secret "$W/c.json"
@@ -936,7 +936,7 @@ client_file "$HOME/.config/oursync/client_secret.json" installed 31-d sec
 run "$SETUP"
 expect_eq "a client already kept by setup is reused" 0 "$RC"
 expect_has "and says so" "$ERR" "Using the client file already at"
-expect_lacks "with no steps shown" "$OUT" "Step 1 of 5"
+expect_lacks "with no steps shown" "$OUT" "Step 1 of 6"
 
 # ---------------------------------------------------------------------------------------------
 echo "--- oursync-setup: the guided run, from nothing to a working remote ---"
@@ -944,18 +944,33 @@ echo "--- oursync-setup: the guided run, from nothing to a working remote ---"
 GOOGLE_NAME="client_secret_9001-abcdef.apps.googleusercontent.com.json"
 fresh
 client_file "$HOME/Downloads/$GOOGLE_NAME" installed 9001-abcdef.apps.googleusercontent.com gsec
-DISPLAY=:0 run_with '\n\n\n\n\n\n\n' "$SETUP"
+DISPLAY=:0 run_with '\n\n\n\n\n\n\n\n' "$SETUP"
 expect_eq "one run, with no re-run, ends at a working remote" 0 "$RC"
-expect_has "step 1 is the project" "$OUT" "Step 1 of 5 - a project"
-expect_has "step 3 publishes, which is what stops the seven-day expiry" "$OUT" "Publish app"
+expect_has "step 1 is the project" "$OUT" "Step 1 of 6 - a project"
+expect_has "there are six steps, the last being the Drive API" "$OUT" "Step 6 of 6 - the Drive API"
+expect_lacks "and no step claims a seventh" "$OUT" "of 5 -"
+expect_has "the intro says six" "$OUT" "Six short steps"
+expect_has "step 3 is the branding" "$OUT" "Step 3 of 6 - the branding"
+expect_has "step 3 gives the app name" "$OUT" "App name:                          OurSync"
+expect_has "step 3 gives the home page" "$OUT" "https://recklesstechnology.com/oursync/"
+expect_has "step 3 gives the privacy page" "$OUT" "https://recklesstechnology.com/legal/privacy/"
+expect_has "step 3 adds the authorized domain" "$OUT" "\"+ Add domain\" and enter recklesstechnology.com"
+expect_has "step 3 keeps the no-logo instruction" "$OUT" "Leave the logo"
+expect_has "step 4 publishes, which is what stops the seven-day expiry" "$OUT" "Step 4 of 6 - publish it"
+expect_has "step 4 names Google's dialog" "$OUT" "Push to"
+expect_has "step 4 says what the unverified consequences are" "$OUT" "cap of 100 users"
+expect_lacks "and no longer claims no verification is needed" "$OUT" "No verification is needed"
+expect_has "step 5 says to download before closing the box" "$OUT" "BEFORE you close it"
+expect_has "step 5 says what to do if the browser asks where" "$OUT" "choose your Downloads folder"
 expect_lacks "and there is no test-user step" "$OUT" "Test users"
-expect_has "step 5 enables the Drive API in the project from the file" "$OUT" "project 9001"
+expect_has "step 6 enables the Drive API in the project from the file" "$OUT" "project 9001"
 opened=$(cat "$STUB_DIR/open.log" 2>/dev/null)
 expect_has "step 1 opens its page" "$opened" "https://console.cloud.google.com/projectcreate"
 expect_has "step 2 opens its page" "$opened" "https://console.cloud.google.com/auth/overview"
-expect_has "step 3 opens its page" "$opened" "https://console.cloud.google.com/auth/audience"
-expect_has "step 4 opens its page" "$opened" "https://console.cloud.google.com/auth/clients/create"
-expect_has "step 5 opens the project's own enable link" "$opened" "https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com&project=9001"
+expect_has "step 3 opens the branding page" "$opened" "https://console.cloud.google.com/auth/branding"
+expect_has "step 4 opens the audience page" "$opened" "https://console.cloud.google.com/auth/audience"
+expect_has "step 5 opens its page" "$opened" "https://console.cloud.google.com/auth/clients/create"
+expect_has "step 6 opens the project's own enable link" "$opened" "https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com&project=9001"
 expect_has "the links are printed as well" "$ERR" "https://console.cloud.google.com/projectcreate"
 expect_has "the downloaded file was found by its Google name" "$ERR" "$GOOGLE_NAME"
 expect_has "and installed" "$(cat "$HOME/.config/oursync/client_secret.json")" "gsec"
@@ -968,22 +983,22 @@ expect_has "and the run ends with the mount instructions" "$OUT" "Set up. Drive 
 # No display, or ssh: nothing is opened and the links are printed.
 fresh
 client_file "$HOME/Downloads/$GOOGLE_NAME" installed 9001-abcdef.apps.googleusercontent.com gsec
-run_with '\n\n\n\n\n\n\n' "$SETUP"
+run_with '\n\n\n\n\n\n\n\n' "$SETUP"
 expect_no_file "with no display no browser is started" "$STUB_DIR/open.log"
 expect_has "the link is printed instead" "$ERR" "https://console.cloud.google.com/auth/audience"
 fresh
 client_file "$HOME/Downloads/$GOOGLE_NAME" installed 9001-abcdef.apps.googleusercontent.com gsec
-DISPLAY=:0 SSH_CONNECTION="1 2 3 4" run_with '\n\n\n\n\n\n\n' "$SETUP"
+DISPLAY=:0 SSH_CONNECTION="1 2 3 4" run_with '\n\n\n\n\n\n\n\n' "$SETUP"
 expect_no_file "over ssh none is started even with DISPLAY set" "$STUB_DIR/open.log"
 fresh
 client_file "$HOME/Downloads/$GOOGLE_NAME" installed 9001-abcdef.apps.googleusercontent.com gsec
-WAYLAND_DISPLAY=wayland-0 run_with '\n\n\n\n\n\n\n' "$SETUP"
+WAYLAND_DISPLAY=wayland-0 run_with '\n\n\n\n\n\n\n\n' "$SETUP"
 expect_file "under Wayland the browser is opened" "$STUB_DIR/open.log"
 
 # Declining the deletion keeps the file.
 fresh
 client_file "$HOME/Downloads/$GOOGLE_NAME" installed 9001-abcdef.apps.googleusercontent.com gsec
-run_with '\n\n\n\n\n\nn\n' "$SETUP"
+run_with '\n\n\n\n\n\n\nn\n' "$SETUP"
 expect_file "answering n keeps the Downloads copy" "$HOME/Downloads/$GOOGLE_NAME"
 
 # Several downloads: newest first, and the choice is the person's.
@@ -992,7 +1007,7 @@ client_file "$HOME/Downloads/client_secret_1-old.apps.googleusercontent.com.json
 client_file "$HOME/Downloads/client_secret_2-new.apps.googleusercontent.com.json" installed 2-new.apps.googleusercontent.com newsec
 touch -d '2026-01-01' "$HOME/Downloads/client_secret_1-old.apps.googleusercontent.com.json"
 printf 'unrelated' > "$HOME/Downloads/notes.json"
-run_with '\n\n\n\n\n\n\n' "$SETUP"
+run_with '\n\n\n\n\n\n\n\n' "$SETUP"
 expect_has "the newest is the default" "$(remote_conf gdrive-own)" "client_id = 2-new"
 expect_has "and both are listed, newest first" "$ERR" "1) client_secret_2-new"
 expect_has "the older is listed second" "$ERR" "2) client_secret_1-old"
@@ -1001,18 +1016,18 @@ fresh
 client_file "$HOME/Downloads/client_secret_1-old.apps.googleusercontent.com.json" installed 1-old.apps.googleusercontent.com oldsec
 client_file "$HOME/Downloads/client_secret_2-new.apps.googleusercontent.com.json" installed 2-new.apps.googleusercontent.com newsec
 touch -d '2026-01-01' "$HOME/Downloads/client_secret_1-old.apps.googleusercontent.com.json"
-run_with '\n\n\n\n2\n\n\n' "$SETUP"
+run_with '\n\n\n\n\n2\n\n\n' "$SETUP"
 expect_has "typing 2 takes the second" "$(remote_conf gdrive-own)" "client_id = 1-old"
 fresh
 client_file "$HOME/Downloads/client_secret_1-a.json" installed 1-a s
-run_with '\n\n\n\n7\n9\nzzz-not-a-path\n\n\n\n' "$SETUP"
+run_with '\n\n\n\n\n7\n9\nzzz-not-a-path\n\n\n\n' "$SETUP"
 expect_has "a number out of range is said so" "$ERR" "there is no number 7"
 expect_has "so is an unreadable path" "$ERR" "cannot read 'zzz-not-a-path'"
 expect_eq "and it still gets there" 0 "$RC"
 fresh
 client_file "$HOME/Downloads/client_secret_1-a.json" installed 1-a s
 client_file "$W/elsewhere/mine.json" installed 55-mine s2
-run_with "\\n\\n\\n\\n$W/elsewhere/mine.json\\n\\n\\n" "$SETUP"
+run_with "\\n\\n\\n\\n\\n$W/elsewhere/mine.json\\n\\n\\n" "$SETUP"
 expect_has "a path typed by hand is taken" "$(remote_conf gdrive-own)" "client_id = 55-mine"
 expect_file "and its source is not deleted, since it was not found in Downloads' list" "$W/elsewhere/mine.json"
 
@@ -1020,7 +1035,7 @@ expect_file "and its source is not deleted, since it was not found in Downloads'
 fresh
 client_file "$W/late/client.json" installed 8-late s3
 mkdir -p "$HOME/Downloads"
-run_with "\\n\\n\\n\\n\\nnope\\n$W/late/client.json\\n\\n\\n" "$SETUP"
+run_with "\\n\\n\\n\\n\\n\\nnope\\n$W/late/client.json\\n\\n\\n" "$SETUP"
 expect_has "no download yet is said so" "$ERR" "No client_secret_*.json in $HOME/Downloads yet"
 expect_has "and an unreadable path is said so" "$ERR" "cannot read 'nope'"
 expect_has "a typed path then works" "$(remote_conf gdrive-own)" "client_id = 8-late"
@@ -1028,7 +1043,7 @@ expect_has "a typed path then works" "$(remote_conf gdrive-own)" "client_id = 8-
 # The Downloads folder is the one the desktop names, not just ~/Downloads.
 fresh
 client_file "$HOME/Telechargements/client_secret_3-fr.json" installed 3-fr s4
-STUB_XDG_DOWNLOAD="$HOME/Telechargements" run_with '\n\n\n\n\n\n\n' "$SETUP"
+STUB_XDG_DOWNLOAD="$HOME/Telechargements" run_with '\n\n\n\n\n\n\n\n' "$SETUP"
 expect_has "xdg-user-dir's Downloads folder is searched" "$(remote_conf gdrive-own)" "client_id = 3-fr"
 
 # A wrong file does not end the run: it says what is wrong and offers another go.
@@ -1084,6 +1099,8 @@ printf 'Error: access_denied\n' > "$STUB_DIR/reconnect_err_once"
 run_with '\n' "$SETUP" --client-secret "$W/client.json"
 expect_has "access_denied says the app is not published" "$ERR" "not published and you are not a listed test user"
 expect_has "with the link to publish it, in the project" "$ERR" "auth/audience?project=1234"
+expect_has "and says what blocks the Publish app button" "$ERR" "greyed out until the branding is saved"
+expect_has "with the branding link, in the project" "$ERR" "auth/branding?project=1234"
 expect_has "offering the retry" "$ERR" "Press Enter to try again"
 expect_eq "which then succeeds" 0 "$RC"
 expect_has "and the remote has its token" "$(remote_conf gdrive-own)" "token = "

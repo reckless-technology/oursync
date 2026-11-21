@@ -75,27 +75,37 @@ Cloud project, and it is not optional:
   exemption: no verification, no assessment, and an API quota nobody else is sharing.
 
 So the wall is real, and the trade is a good one: your credential, your project, your quota.
-`oursync setup` makes it as short as it can be. It is one run: five pages of Google's console, each
+`oursync setup` makes it as short as it can be. It is one run: six pages of Google's console, each
 opened for you (or its link printed, over ssh or with no display), with a line or two on what to
 click, and Enter to move on.
 
 1. Create a project.
 2. Set up the consent screen: "Get started", audience **External**.
-3. Click **Publish app**. This is what keeps the token alive: a project left in Google's "Testing"
-   status expires its refresh token after seven days. It needs no verification, and it means you
-   do not have to add yourself as a test user. Add no logo anywhere: an app carrying one has to be
-   verified.
-4. Create a **Desktop app** client and click Download JSON. `oursync setup` finds the file in your
-   Downloads folder itself, checks it is a Desktop client (a Web one fails later with
-   `redirect_uri_mismatch`, so it is refused now), keeps a private copy and offers to delete the
+3. Fill in the **Branding** page with exactly these values, which are the ones Google's **Publish
+   app** button needs before it will work: app name `OurSync`; application home page
+   `https://recklesstechnology.com/oursync/`; application privacy policy link
+   `https://recklesstechnology.com/legal/privacy/`; and `recklesstechnology.com` under
+   "Authorized domains" (the page says "Missing domain" until it is added). Add no logo and no terms
+   of service link: an app with a logo has to be verified. Save.
+4. Click **Publish app** and Confirm in "Push to production?". This is what keeps the token alive: a
+   project left in Google's "Testing" status expires its refresh token after seven days. You do not
+   submit for verification. Google's dialog says an app that "requests sensitive or restricted
+   scopes" needs it, and the consequence of skipping it is an "unverified app" screen at the consent
+   and a cap of 100 users, neither of which matters for your own use. The Branding page afterwards
+   offers "Verify branding": ignore it. Publishing means you do not have to add yourself as a test
+   user.
+5. Create a **Desktop app** client and click Download JSON **before closing the box**: Google never
+   shows the secret again. If your browser asks where to save, choose your Downloads folder.
+   `oursync setup` finds the file there itself, checks it is a Desktop client (a Web one fails later
+   with `redirect_uri_mismatch`, so it is refused now), keeps a private copy and offers to delete the
    download.
-5. Enable the Drive API, from a link already pointing at your project.
+6. Enable the Drive API, from a link already pointing at your project.
 
 Setup then opens Google's consent in your browser, and asks Drive one question to make sure the
 remote works before it says it is done. You will click through an "unverified app" warning there:
 the app is yours and you have not paid Google to verify it. Choose Advanced, then "Go to ...".
 If something goes wrong, setup says which of the usual causes it is (the API not enabled, the app
-not published, the wrong kind of client) and gives the link that fixes it. With
+not published or the branding not saved, the wrong kind of client) and gives the link that fixes it. With
 `--client-secret PATH`, or a file already at `~/.config/oursync/client_secret.json`, the guided
 steps are skipped.
 

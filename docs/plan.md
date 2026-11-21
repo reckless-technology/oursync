@@ -110,8 +110,20 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
   own project was published on 2026-11-18 and its logo removed for exactly this reason. Since
   2026-11-19 setup has the user publish *before* the client exists and consent happens, which
   drops the test-user step. Google's documentation says production is open to any account and
-  that Testing expires the token; it does not say publishing before a client exists is allowed,
-  and that ordering is unconfirmed against a real fresh project (see the PR that introduced it).
+  that Testing expires the token; it does not say publishing before a client exists is allowed.
+  **Confirmed against a real fresh project on 2026-11-20:** it is allowed, but only once the
+  Branding page (`console.cloud.google.com/auth/branding`) is filled in. Until then **Publish app**
+  is disabled ("To publish your app, you must complete your configuration on the Branding page."),
+  because "Valid app name, support email, homepage url, and privacy policy url are required".
+  What was entered and accepted: app name `OurSync`, home page
+  `https://recklesstechnology.com/oursync/`, privacy link `https://recklesstechnology.com/legal/privacy/`,
+  authorised domain `recklesstechnology.com` (the page says "Missing domain" until it is added), no
+  logo, no terms of service. Publishing then asks "Push to production?", with Google's note that an
+  app with more than 10 domains, a logo, or sensitive or restricted scopes "will need to submit for
+  verification"; Confirm, and the Audience page reads "In production" with "0 users / 100 user cap".
+  The Branding page then says its branding "needs to be verified" and offers "Verify branding";
+  ignored, and the consent worked. Setup therefore has a branding step of its own (step 3 of 6), so
+  every user enters Jonny's three values (his decision, 2026-11-20).
   `oursync doctor` cannot read the publishing status, and says so rather than guess.
 - **Shared drives and "shared with me"**, which are configuration rather than design, and the
   largest remaining gap after writes. [parity.md](parity.md) is the full audit against Drive for
@@ -128,7 +140,7 @@ equivalent: streaming by default, chosen files mirrored, synchronised both ways.
 1. **Publishing a release.** The machinery leaves a draft; putting it in front of the public is a
    human step, as everywhere else in the organisation.
 2. **Whether the Google onboarding wall is acceptable** for the people he wants to share this with.
-   Every user must create their own Cloud project and OAuth client — five console pages, each opened for
+   Every user must create their own Cloud project and OAuth client — six console pages, each opened for
    them by `oursync setup`. It cannot be removed:
 
    - Seeing a whole Drive needs Google's **restricted** `drive` scope.
