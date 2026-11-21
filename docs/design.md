@@ -1045,6 +1045,14 @@ to assume.
    (recklesstechnology.com and its `legal/privacy/` page both exist and serve), and one 2026-04
    report had a publish rejected because the app name did not match the name on the homepage — the
    consent screen is currently "Reckless Technology uploader". Both are Jonny's to decide (A2).
+
+   **First-hand result, 2026-11-20** (a click-through on a fresh project): the first obstacle is
+   real and the second did not recur. Publish app stayed disabled until Branding held the app name,
+   support email, home page and privacy-policy link, and the page wanted the authorised domain
+   `recklesstechnology.com` added too. With the app name `OurSync`, the home page
+   `https://recklesstechnology.com/oursync/` and the privacy page `https://recklesstechnology.com/legal/privacy/`,
+   Save and then Publish app were accepted, with no client yet created, and the Audience page read
+   "In production", "0 users / 100 user cap". The seven-day cap was not tested by that run.
 2. **Range-read behaviour in practice:** does `alt=media` answer 206 with `Content-Range`, does it
    redirect to a `googleusercontent.com` host, does the range survive the redirect, and are a
    file's bytes stable between two range requests? §6.2 handles the 200 case defensively either

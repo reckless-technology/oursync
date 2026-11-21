@@ -85,13 +85,15 @@ tools/build-deb.sh                  # the package, into build/deb/
 python3 tools/make-icons.py         # only when icons/source/ changes
 ```
 
-**`oursync setup` is one guided run** (2026-11-19): it opens five console pages with `xdg-open`
+**`oursync setup` is one guided run** (2026-11-19): it opens six console pages with `xdg-open`
 (only with a display and no `SSH_CONNECTION`), finds the downloaded `client_secret_*.json` in
 `xdg-user-dir DOWNLOAD`, validates it with `oursync check-client` (Desktop `installed` only; a
-`web` client is refused), consents, and checks the remote with `rclone about`. The user publishes
-the app ("In production") *before* the client exists, so there is no test-user step; whether
-Google allows that ordering before any client exists is **unconfirmed against a real project**,
-and the access_denied diagnosis tells the user to publish or add themselves as a test user. The
+`web` client is refused), consents, and checks the remote with `rclone about`. The user fills in the Branding
+page (name `OurSync`, home page and privacy page on recklesstechnology.com, that authorised domain,
+no logo) and publishes the app ("In production") *before* the client exists, so there is no
+test-user step; **that ordering was confirmed against a real fresh project on 2026-11-20**, provided
+Branding is filled in first (Publish app is disabled until it is). The access_denied diagnosis says
+what blocks that button and tells the user to publish or add themselves as a test user. The
 sequence is only proven against the stub: a real consent needs Jonny's click-through.
 
 **There are three kinds of test, and only the first two run in CI.** `tools/script-tests.sh` runs

@@ -153,6 +153,12 @@ PROJECT=""
 CLIENT_ID=""
 CLIENT_SECRET_VALUE=""
 PICKED=""
+# How many console steps guided_client walks; every "Step N of M" line says it.
+STEP_COUNT=6
+# The three values every user enters, Jonny's decision of 2026-11-20: the OurSync page and privacy page.
+SETUP_DOMAIN="recklesstechnology.com"
+SETUP_HOME_PAGE="https://recklesstechnology.com/oursync/"
+SETUP_PRIVACY_PAGE="https://recklesstechnology.com/legal/privacy/"
 
 intro_notes() {
     cat <<'NOTES'
@@ -162,7 +168,7 @@ verification plus an annually renewed third-party security assessment. A client 
 Google Cloud project falls under Google's personal-use exemption instead: no verification, no
 assessment, and an API quota nobody else is sharing.
 
-Five short steps in your browser, then OurSync does the rest in this one run. Each step opens its
+Six short steps in your browser, then OurSync does the rest in this one run. Each step opens its
 page (or prints the link, over ssh or with no display) and waits for you to press Enter.
 NOTES
 }
@@ -191,7 +197,7 @@ pause() { # prompt
 }
 
 guide_step() { # number title url text
-    printf '\nStep %s of 5 - %s\n' "$1" "$2"
+    printf '\nStep %s of %s - %s\n' "$1" "$STEP_COUNT" "$2"
     printf '%s\n' "$4"
     open_url "$3"
     pause "  Press Enter when done. "
@@ -285,17 +291,28 @@ guided_client() {
   one selected in the bar at the top."
     guide_step 2 "the consent screen" "$CONSOLE/auth/overview" "  Click \"Get started\". App name: anything. Support email: yours. Audience: External. Contact
   email: yours. Agree, then Create."
-    guide_step 3 "publish it, which is what stops the seven-day expiry" "$CONSOLE/auth/audience" "  Click \"Publish app\", then Confirm. No verification is needed, and it removes the need to add
-  yourself as a test user. Do NOT add a logo anywhere: an app with one has to be verified."
-    guide_step 4 "a Desktop client" "$CONSOLE/auth/clients/create" "  Application type \"Desktop app\", any name, Create. In the box that appears, click \"Download JSON\".
-  It lands in your Downloads folder and OurSync will find it there."
+    guide_step 3 "the branding, which Publish app needs" "$CONSOLE/auth/branding" "  Fill in exactly these, so the next step can be taken:
+    App name:                          OurSync
+    Application home page:             $SETUP_HOME_PAGE
+    Application privacy policy link:   $SETUP_PRIVACY_PAGE
+  Under \"Authorized domains\" click \"+ Add domain\" and enter $SETUP_DOMAIN (the page shows
+  \"Missing domain\" until you do). Leave the logo and the terms of service link empty: an app with a
+  logo has to be verified. Click Save."
+    guide_step 4 "publish it, which is what stops the seven-day expiry" "$CONSOLE/auth/audience" "  Click \"Publish app\" (it is greyed out until the branding is saved), then Confirm in \"Push to
+  production?\". Google says an app with restricted scopes must \"submit for verification\"; you do
+  not. The consequences are an \"unverified app\" screen at the consent and a cap of 100 users, and
+  neither matters for your own use. The branding page then offers \"Verify branding\": ignore it.
+  Publishing first also removes the need to add yourself as a test user."
+    guide_step 5 "a Desktop client" "$CONSOLE/auth/clients/create" "  Application type \"Desktop app\", any name, Create. In the \"OAuth client created\" box, click
+  \"Download JSON\" BEFORE you close it: Google never shows the secret again. If your browser asks
+  where to save, choose your Downloads folder; OurSync looks for it there."
     printf '\nLooking for the file you downloaded.\n' >&2
     while :; do
         pick_client
         validate_client "$PICKED" && break
         note "  Pick another, or download it again."
     done
-    guide_step 5 "the Drive API" "$(enable_api_url)" "  Click Enable (project ${PROJECT:-?}, the one in your file). If it says \"API enabled\" already,
+    guide_step 6 "the Drive API" "$(enable_api_url)" "  Click Enable (project ${PROJECT:-?}, the one in your file). If it says \"API enabled\" already,
   there is nothing to do."
 }
 
@@ -331,7 +348,8 @@ explain_failure() { # text
     case "$1" in
         *access_denied*)
             note "Google refused: the app is not published and you are not a listed test user."
-            note "Click \"Publish app\" at $(project_url auth/audience) and try again. (Adding yourself as a"
+            note "Publish app is greyed out until the branding is saved: fill it in at $(project_url auth/branding),"
+            note "then click \"Publish app\" at $(project_url auth/audience) and try again. (Adding yourself as a"
             note "test user also works, but Google then expires the token after seven days.)" ;;
         *redirect_uri_mismatch*)
             note "Google refused the redirect: that client is not a Desktop app."

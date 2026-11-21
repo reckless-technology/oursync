@@ -73,7 +73,7 @@ mount.
 ## What `oursync setup` does
 
 One run, in this order: check rclone against the floor; print why the step exists; walk through
-five console pages (project, consent screen, **Publish app**, Desktop client, Drive API), opening
+six console pages (project, consent screen, branding, **Publish app**, Desktop client, Drive API), opening
 each with `xdg-open` when there is a display and no ssh session, otherwise printing the link;
 find `client_secret_*.json` in `xdg-user-dir DOWNLOAD` (default `~/Downloads`), newest first, and
 ask which when several; validate it (`oursync check-client`: top-level `installed`, with a
