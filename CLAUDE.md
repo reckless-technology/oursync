@@ -156,41 +156,19 @@ bugs would have read as "1.60 is too old" had it been run there first.
 
 ## Traps particular to this project
 
-- **Build the package on Mint, not only in CI.** Three faults showed up only there, because
-  lintian's idea of a valid distribution depends on its vendor: `lsb_release -cs` gives Mint's own
-  codename (`zena`), which lintian has never heard of; `unstable` is a Debian suite that lintian
-  rejects on an Ubuntu-derived system; and `/etc/os-release` is the portable answer, since Mint
-  carries `UBUNTU_CODENAME=noble` beside `VERSION_CODENAME=zena`. **Source it in a subshell** —
-  `/etc/os-release` sets `VERSION`, which otherwise replaced the version from the git tags with
-  "22.3 (Zena)".
-- **Do not depend on an Essential package.** `coreutils`, `sed` and `findutils` are always present,
-  and depending on one without a version is a lintian *error*, not a warning.
-- **`dpkg-buildpackage` runs `debian/rules clean` first**, so a clean target that removes the whole
-  of `build/` deletes the output directory the caller just made. It removes only `build/staged`.
-- **`dpkg-checkbuilddeps` wants `build-essential`** even though nothing here compiles: Debian policy
-  makes it an implicit build dependency. Install it rather than passing `-d`, which would skip every
-  build dependency check.
-- **Never run `lsof +D ~/Drive`.** It walks the whole mount, which means listing 5 TB of Drive: it
-  hangs, and it spends quota doing it. To find what has the mount open, read `/proc/*/fd` instead.
-- **Nor anything else that walks `$HOME`.** The mount lives *inside* the home directory, so a plain
-  `find ~ -name something` descends into all of Drive — it looks like an ordinary search and is the
-  same mistake as the one above. `find "$HOME" -xdev` stays on the real filesystem and is what to
-  reach for by default. Killing the local `ssh` client does **not** stop the remote `find`: check
-  with `pgrep -ax find` and kill it by pid, or it keeps spending quota after you have moved on.
-- **Never name a variable `RCLONE_<anything>` unless you mean the flag.** rclone reads every flag
-  from `RCLONE_<FLAG>`, which is exactly why the control-port password can be passed safely through
-  the environment — and it means an innocent-looking workflow variable is a command-line argument.
-  `RCLONE_VERSION: "1.76.0"` in `release.yml` was read as `--version`, so every later rclone call
-  died with `strconv.ParseBool: parsing "1.76.0": invalid syntax`. The mechanism the project relies
-  on deliberately is the one that bites. Keep workflow and script variables out of that namespace
-  (`TARGET_RCLONE`, not `RCLONE_VERSION`) rather than hoping a name is not a flag.
-- **`apt install ./oursync.deb` pulls the whole GTK tree, and it is slow enough to kill a release.**
-  The package `Recommends: nemo, libnotify-bin`, and apt installs Recommends by default, so a plain
-  install drags in nemo, gvfs, webkit2gtk, yelp, file-roller and gstreamer. On 2026-11-18 that took
-  **32 minutes** on a hosted runner and killed three release runs at the timeout — which was twice
-  misread as a slow mirror and "fixed" by raising the cap. Use `--no-install-recommends` wherever
-  the Nemo integration is not the thing under test. And read the timestamps in a log before
-  blaming the network: the step names were different each time, but the minutes were all in apt.
+- **Debian packaging on Mint** (build on Mint and not only in CI; `UBUNTU_CODENAME` from `/etc/os-release`, sourced in
+  a subshell; no Essential dependency; `debian/rules clean` removes only `build/staged`; `build-essential` installed, not
+  `-d`): the `reckless-working-practice` skill, `references/tooling-gotchas.md`, "Debian packaging on Mint". Here the
+  codename is read in `tools/build-deb.sh`, and `build/staged` is the only thing the clean target may remove.
+- **Never walk `$HOME` while `~/Drive` is mounted** (`lsof +D ~/Drive`, `find ~`; use `find "$HOME" -xdev` and
+  `/proc/*/fd`, and kill a stray remote `find` by pid): the workspace memory note `linux-legion-shell-traps`.
+- **Never name a variable `RCLONE_<anything>` unless you mean the flag**: `reckless-working-practice`,
+  `references/tooling-gotchas.md`, "A tool that reads its flags from an environment prefix turns your variable into an
+  argument". Ours was `RCLONE_VERSION` in `release.yml`, now `TARGET_RCLONE`; the control-port password goes through
+  `RCLONE_RC_PASS` on purpose.
+- **`apt install ./oursync.deb` installs Recommends (`nemo`, `libnotify-bin`)** and took 32 minutes on 2026-11-18:
+  use `--no-install-recommends` unless the Nemo integration is under test. The reasoning is in `reckless-working-practice`,
+  `references/tooling-gotchas.md`, "`apt install ./pkg.deb` installs Recommends".
 - **`vfs/forget` cannot make a new pin visible; only `vfs/refresh` can.** Measured on 1.76.0,
   2026-11-18, five runs of each and deterministic. A pin copies the file to local disk behind the
   mount's back, and the mount's object for that path was resolved when only the remote upstream held
